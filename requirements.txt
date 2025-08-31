@@ -1,2 +1,1 @@
-fastapi
-uvicorn
+# Минимальные зависимости для Python HTTP сервера
