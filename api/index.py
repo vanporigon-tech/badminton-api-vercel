@@ -151,6 +151,69 @@ class handler(BaseHTTPRequestHandler):
                 room_counter += 1
                 response = new_room
                 
+            elif path.startswith('/rooms/') and path.endswith('/join'):
+                # Присоединение к комнате
+                room_id = int(path.split('/')[-2])
+                telegram_id = data['telegram_id']
+                first_name = data.get('first_name', 'Игрок')
+                last_name = data.get('last_name', '')
+                username = data.get('username')
+                
+                if room_id not in rooms_db:
+                    self.send_response(404)
+                    response = {"error": "Комната не найдена"}
+                else:
+                    room = rooms_db[room_id]
+                    
+                    # Проверяем не присоединился ли уже
+                    already_joined = any(member['player']['telegram_id'] == telegram_id for member in room['members'])
+                    
+                    if already_joined:
+                        response = {"message": "Вы уже в комнате", "room": room}
+                    elif len(room['members']) >= room['max_players']:
+                        self.send_response(400)
+                        response = {"error": "Комната заполнена"}
+                    else:
+                        # Создаем/обновляем игрока
+                        if telegram_id not in players_db:
+                            players_db[telegram_id] = {
+                                "id": telegram_id,
+                                "telegram_id": telegram_id,
+                                "first_name": first_name,
+                                "last_name": last_name,
+                                "username": username,
+                                "rating": 1500
+                            }
+                        else:
+                            # Обновляем данные игрока
+                            players_db[telegram_id].update({
+                                "first_name": first_name,
+                                "last_name": last_name,
+                                "username": username
+                            })
+                        
+                        player = players_db[telegram_id]
+                        
+                        # Добавляем игрока в комнату
+                        new_member = {
+                            "id": len(room['members']) + 1,
+                            "player": player,
+                            "is_leader": False,
+                            "joined_at": datetime.now().isoformat()
+                        }
+                        
+                        room['members'].append(new_member)
+                        room['member_count'] = len(room['members'])
+                        
+                        # Обновляем комнату в базе
+                        rooms_db[room_id] = room
+                        
+                        response = {
+                            "message": "Успешно присоединились к комнате",
+                            "room": room,
+                            "member": new_member
+                        }
+                
             else:
                 self.send_response(404)
                 response = {"error": "Endpoint not found"}
