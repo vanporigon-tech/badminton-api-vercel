@@ -213,6 +213,52 @@ class handler(BaseHTTPRequestHandler):
                             "room": room,
                             "member": new_member
                         }
+                        
+            elif path.startswith('/rooms/') and path.endswith('/leave'):
+                # Выход из комнаты
+                room_id = int(path.split('/')[-2])
+                telegram_id = data['telegram_id']
+                
+                if room_id not in rooms_db:
+                    self.send_response(404)
+                    response = {"error": "Комната не найдена"}
+                else:
+                    room = rooms_db[room_id]
+                    
+                    # Находим участника для удаления
+                    member_to_remove = None
+                    for i, member in enumerate(room['members']):
+                        if member['player']['telegram_id'] == telegram_id:
+                            member_to_remove = i
+                            break
+                    
+                    if member_to_remove is not None:
+                        # Удаляем участника
+                        removed_member = room['members'].pop(member_to_remove)
+                        room['member_count'] = len(room['members'])
+                        
+                        # Если создатель покидает комнату и есть другие участники - передаем права
+                        if room['creator_id'] == telegram_id and len(room['members']) > 0:
+                            new_leader = room['members'][0]
+                            new_leader['is_leader'] = True
+                            room['creator_id'] = new_leader['player']['telegram_id']
+                            room['creator_full_name'] = f"{new_leader['player']['first_name']} {new_leader['player']['last_name']}".strip()
+                        
+                        # Если комната пуста - удаляем её
+                        if len(room['members']) == 0:
+                            del rooms_db[room_id]
+                            response = {"message": "Вы покинули комнату. Комната удалена."}
+                        else:
+                            # Обновляем комнату в базе
+                            rooms_db[room_id] = room
+                            response = {
+                                "message": "Вы покинули комнату",
+                                "room": room,
+                                "removed_member": removed_member
+                            }
+                    else:
+                        self.send_response(400)
+                        response = {"error": "Вы не состоите в этой комнате"}
                 
             else:
                 self.send_response(404)
