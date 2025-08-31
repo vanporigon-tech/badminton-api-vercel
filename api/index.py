@@ -113,43 +113,54 @@ class handler(BaseHTTPRequestHandler):
                 # Создание комнаты
                 creator_id = data['creator_telegram_id']
                 
-                # Создаем игрока если его нет
-                if creator_id not in players_db:
-                    players_db[creator_id] = {
-                        "id": creator_id,
-                        "telegram_id": creator_id,
-                        "first_name": "Игрок",
-                        "last_name": f"{creator_id}",
-                        "username": None,
-                        "rating": 1500
-                    }
+                # ПРОВЕРЯЕМ НЕ СОЗДАЛ ЛИ УЖЕ КОМНАТУ
+                existing_room = None
+                for room_id, room in rooms_db.items():
+                    if room['creator_id'] == creator_id:
+                        existing_room = room_id
+                        break
                 
-                creator = players_db[creator_id]
-                creator_full_name = f"{creator['first_name']} {creator.get('last_name', '')}".strip()
-                
-                # Создаем комнату
-                new_room = {
-                    "id": room_counter,
-                    "name": data['name'],
-                    "creator_id": creator_id,
-                    "creator_full_name": creator_full_name,
-                    "max_players": data.get('max_players', 4),
-                    "member_count": 1,
-                    "is_active": True,
-                    "created_at": datetime.now().isoformat(),
-                    "members": [
-                        {
-                            "id": 1,
-                            "player": creator,
-                            "is_leader": True,
-                            "joined_at": datetime.now().isoformat()
+                if existing_room:
+                    self.send_response(400)
+                    response = {"error": f"Вы уже создали комнату #{existing_room}. Можно создать только одну комнату."}
+                else:
+                    # Создаем игрока если его нет
+                    if creator_id not in players_db:
+                        players_db[creator_id] = {
+                            "id": creator_id,
+                            "telegram_id": creator_id,
+                            "first_name": "Игрок",
+                            "last_name": f"{creator_id}",
+                            "username": None,
+                            "rating": 1500
                         }
-                    ]
-                }
                 
-                rooms_db[room_counter] = new_room
-                room_counter += 1
-                response = new_room
+                    creator = players_db[creator_id]
+                    creator_full_name = f"{creator['first_name']} {creator.get('last_name', '')}".strip()
+                    
+                    # Создаем комнату
+                    new_room = {
+                        "id": room_counter,
+                        "name": data['name'],
+                        "creator_id": creator_id,
+                        "creator_full_name": creator_full_name,
+                        "max_players": data.get('max_players', 4),
+                        "member_count": 1,
+                        "is_active": True,
+                        "created_at": datetime.now().isoformat(),
+                        "members": [
+                            {
+                                "id": 1,
+                                "player": creator,
+                                "is_leader": True,
+                                "joined_at": datetime.now().isoformat()
+                            }
+                        ]
+                    }
+                    
+                    rooms_db[room_counter] = new_room
+                    room_counter += 1
+                    response = new_room
                 
             elif path.startswith('/rooms/') and path.endswith('/join'):
                 # Присоединение к комнате
@@ -237,19 +248,25 @@ class handler(BaseHTTPRequestHandler):
                         removed_member = room['members'].pop(member_to_remove)
                         room['member_count'] = len(room['members'])
                         
-                        # Если создатель покидает комнату и есть другие участники - передаем права
-                        if room['creator_id'] == telegram_id and len(room['members']) > 0:
-                            new_leader = room['members'][0]
-                            new_leader['is_leader'] = True
-                            room['creator_id'] = new_leader['player']['telegram_id']
-                            room['creator_full_name'] = f"{new_leader['player']['first_name']} {new_leader['player']['last_name']}".strip()
-                        
-                        # Если комната пуста - удаляем её
-                        if len(room['members']) == 0:
+                        # ЕСЛИ СОЗДАТЕЛЬ ПОКИДАЕТ КОМНАТУ - РАСФОРМИРОВЫВАЕМ ПОЛНОСТЬЮ
+                        if room['creator_id'] == telegram_id:
+                            # Создаем список участников для уведомления
+                            remaining_members = [member['player']['telegram_id'] for member in room['members']]
+                            
+                            # Удаляем комнату полностью
+                            del rooms_db[room_id]
+                            
+                            response = {
+                                "message": "Комната расформирована",
+                                "room_disbanded": True,
+                                "affected_members": remaining_members
+                            }
+                        elif len(room['members']) == 0:
+                            # Если комната пуста - удаляем её
                             del rooms_db[room_id]
                             response = {"message": "Вы покинули комнату. Комната удалена."}
                         else:
-                            # Обновляем комнату в базе
+                            # Обычный выход участника
                             rooms_db[room_id] = room
                             response = {
                                 "message": "Вы покинули комнату",
