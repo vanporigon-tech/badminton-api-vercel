@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Mini App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #233e39;
+            color: white;
+        }
+        .test-section {
+            background: rgba(255,255,255,0.1);
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 10px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .result {
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            white-space: pre-wrap;
+        }
+        .error {
+            background: rgba(255,0,0,0.3);
+        }
+        .success {
+            background: rgba(0,255,0,0.3);
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Тест Mini App API</h1>
+    
+    <div class="test-section">
+        <h3>1. Проверка здоровья API</h3>
+        <button onclick="testHealth()">Проверить /health</button>
+        <div id="health-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>2. Создание комнаты</h3>
+        <input type="text" id="room-name" placeholder="Название комнаты" value="Пример комнаты">
+        <button onclick="testCreateRoom()">Создать комнату</button>
+        <div id="create-room-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>3. Регистрация игрока</h3>
+        <input type="text" id="player-name" placeholder="Имя" value="Иван">
+        <input type="text" id="player-surname" placeholder="Фамилия" value="Игрок">
+        <input type="number" id="player-rating" placeholder="Рейтинг" value="1500">
+        <button onclick="testCreatePlayer()">Создать игрока</button>
+        <div id="create-player-result" class="result"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>4. Поиск комнат</h3>
+        <button onclick="testSearchRooms()">Найти комнаты</button>
+        <div id="search-rooms-result" class="result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        
+        async function testHealth() {
+            const resultDiv = document.getElementById('health-result');
+            resultDiv.textContent = 'Тестирую...';
+            resultDiv.className = 'result';
+            
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.textContent = `✅ Успешно!\nСтатус: ${response.status}\nДанные: ${JSON.stringify(data, null, 2)}`;
+                    resultDiv.className = 'result success';
+                } else {
+                    resultDiv.textContent = `❌ Ошибка!\nСтатус: ${response.status}\nДанные: ${JSON.stringify(data, null, 2)}`;
+                    resultDiv.className = 'result error';
+                }
+            } catch (error) {
+                resultDiv.textContent = `❌ Ошибка сети: ${error.message}`;
+                resultDiv.className = 'result error';
+            }
+        }
+        
+        async function testCreateRoom() {
+            const resultDiv = document.getElementById('create-room-result');
+            const roomName = document.getElementById('room-name').value;
+            
+            resultDiv.textContent = 'Создаю комнату...';
+            resultDiv.className = 'result';
+            
+            try {
+                const response = await fetch(`${API_BASE}/rooms/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        name: roomName,
+                        creator_id: 123
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.textContent = `✅ Комната создана!\nСтатус: ${response.status}\nДанные: ${JSON.stringify(data, null, 2)}`;
+                    resultDiv.className = 'result success';
+                } else {
+                    resultDiv.textContent = `❌ Ошибка создания!\nСтатус: ${response.status}\nДанные: ${JSON.stringify(data, null, 2)}`;
+                    resultDiv.className = 'result error';
+                }
+            } catch (error) {
+                resultDiv.textContent = `❌ Ошибка сети: ${error.message}`;
+                resultDiv.className = 'result error';
+            }
+        }
+        
+        async function testCreatePlayer() {
+            const resultDiv = document.getElementById('create-player-result');
+            const firstName = document.getElementById('player-name').value;
+            const lastName = document.getElementById('player-surname').value;
+            const rating = parseInt(document.getElementById('player-rating').value);
+            
+            resultDiv.textContent = 'Создаю игрока...';
+            resultDiv.className = 'result';
+            
+            try {
+                const response = await fetch(`${API_BASE}/players/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        telegram_id: 123,
+                        first_name: firstName,
+                        last_name: lastName,
+                        rating: rating
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.textContent = `✅ Игрок создан!\nСтатус: ${response.status}\nДанные: ${JSON.stringify(data, null, 2)}`;
+                    resultDiv.className = 'result success';
+                } else {
+                    resultDiv.textContent = `❌ Ошибка создания!\nСтатус: ${response.status}\nДанные: ${JSON.stringify(data, null, 2)}`;
+                    resultDiv.className = 'result error';
+                }
+            } catch (error) {
+                resultDiv.textContent = `❌ Ошибка сети: ${error.message}`;
+                resultDiv.className = 'result error';
+            }
+        }
+        
+        async function testSearchRooms() {
+            const resultDiv = document.getElementById('search-rooms-result');
+            
+            resultDiv.textContent = 'Ищу комнаты...';
+            resultDiv.className = 'result';
+            
+            try {
+                const response = await fetch(`${API_BASE}/rooms/`);
+                const data = await response.json();
+                
+                if (response.ok) {
+                    resultDiv.textContent = `✅ Комнаты найдены!\nСтатус: ${response.status}\nКоличество: ${data.length}\nДанные: ${JSON.stringify(data, null, 2)}`;
+                    resultDiv.className = 'result success';
+                } else {
+                    resultDiv.textContent = `❌ Ошибка поиска!\nСтатус: ${response.status}\nДанные: ${JSON.stringify(data, null, 2)}`;
+                    resultDiv.className = 'result error';
+                }
+            } catch (error) {
+                resultDiv.textContent = `❌ Ошибка сети: ${error.message}`;
+                resultDiv.className = 'result error';
+            }
+        }
+        
+        // Автоматически тестируем здоровье API при загрузке
+        window.onload = function() {
+            testHealth();
+        };
+    </script>
+</body>
+</html>
+
