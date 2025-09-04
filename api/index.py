@@ -1,12 +1,197 @@
 from http.server import BaseHTTPRequestHandler
 import json
 import urllib.parse
+import math
 from datetime import datetime
 
 # Простое хранилище
 players_db = {}
 rooms_db = {}
 room_counter = 1
+
+# Система рейтинга Glicko-2 для бадминтона
+class Glicko2Rating:
+    def __init__(self, rating=1500, rd=350, vol=0.06):
+        self.rating = rating
+        self.rd = rd  # Rating Deviation
+        self.vol = vol  # Volatility
+    
+    def calculate_g(self, rd):
+        """Вычисляет g(RD)"""
+        return 1 / math.sqrt(1 + (3 * (rd ** 2)) / (math.pi ** 2))
+    
+    def calculate_e(self, opponent_rating, opponent_rd):
+        """Вычисляет E(s|r, rj, RDj)"""
+        g = self.calculate_g(opponent_rd)
+        return 1 / (1 + math.exp(-g * (self.rating - opponent_rating) / 400))
+    
+    def update_rating(self, results, tau=0.5):
+        """Обновляет рейтинг на основе результатов игр
+        results: список кортежей (opponent_rating, opponent_rd, score)
+        score: 1 за победу, 0 за поражение, 0.5 за ничью
+        """
+        if not results:
+            return self.rating, self.rd, self.vol
+        
+        # Шаг 1: Вычисляем v (variance)
+        v = 0
+        for opp_rating, opp_rd, score in results:
+            g = self.calculate_g(opp_rd)
+            e = self.calculate_e(opp_rating, opp_rd)
+            v += (g ** 2) * e * (1 - e)
+        
+        if v == 0:
+            return self.rating, self.rd, self.vol
+        
+        v = 1 / v
+        
+        # Шаг 2: Вычисляем delta
+        delta = 0
+        for opp_rating, opp_rd, score in results:
+            g = self.calculate_g(opp_rd)
+            e = self.calculate_e(opp_rating, opp_rd)
+            delta += g * (score - e)
+        
+        delta *= v
+        
+        # Шаг 3: Обновляем volatility
+        a = math.log(self.vol ** 2)
+        
+        def f(x):
+            ex = math.exp(x)
+            return (ex * (delta ** 2 - self.rd ** 2 - v - ex) / 
+                   (2 * (self.rd ** 2 + v + ex) ** 2)) - (x - a) / (tau ** 2)
+        
+        # Простое приближение для нахождения корня
+        A = a
+        if delta ** 2 > self.rd ** 2 + v:
+            B = math.log(delta ** 2 - self.rd ** 2 - v)
+        else:
+            k = 1
+            while f(a - k * tau) < 0:
+                k += 1
+            B = a - k * tau
+        
+        fA = f(A)
+        fB = f(B)
+        
+        while abs(B - A) > 0.000001:
+            C = A + (A - B) * fA / (fB - fA)
+            fC = f(C)
+            if fC * fB < 0:
+                A = B
+                fA = fB
+            else:
+                fA = fA / 2
+            B = C
+            fB = fC
+        
+        new_vol = math.exp(A / 2)
+        
+        # Шаг 4: Обновляем RD
+        new_rd = math.sqrt(self.rd ** 2 + new_vol ** 2)
+        
+        # Шаг 5: Обновляем рейтинг
+        new_rating = self.rating + (new_rd ** 2) * delta
+        
+        return int(new_rating), int(new_rd), new_vol
+
+def calculate_team_rating(players, is_winner):
+    """Вычисляет командный рейтинг для 2v2"""
+    if len(players) != 2:
+        return 1500
+    
+    # Средний рейтинг команды
+    avg_rating = sum(p['rating'] for p in players) / 2
+    
+    # Бонус за командную игру (5% от среднего рейтинга)
+    team_bonus = avg_rating * 0.05
+    
+    return int(avg_rating + team_bonus)
+
+def calculate_rating_changes(room_data, score_data):
+    """Вычисляет изменения рейтинга после игры
+    score_data: {'team1': [player_ids], 'team2': [player_ids], 'score1': int, 'score2': int}
+    """
+    team1_players = [players_db[pid] for pid in score_data['team1'] if pid in players_db]
+    team2_players = [players_db[pid] for pid in score_data['team2'] if pid in players_db]
+    
+    score1 = score_data['score1']
+    score2 = score_data['score2']
+    
+    # Определяем победителя
+    if score1 > score2:
+        team1_won = True
+        team2_won = False
+    elif score2 > score1:
+        team1_won = False
+        team2_won = True
+    else:
+        # Ничья
+        team1_won = False
+        team2_won = False
+    
+    changes = {}
+    
+    # Обрабатываем команду 1
+    if team1_players:
+        team1_rating = calculate_team_rating(team1_players, team1_won)
+        
+        for player in team1_players:
+            glicko = Glicko2Rating(player['rating'], 350, 0.06)
+            
+            # Создаем результаты против команды 2
+            results = []
+            if team2_players:
+                team2_rating = calculate_team_rating(team2_players, team2_won)
+                score = 1 if team1_won else (0.5 if not team1_won and not team2_won else 0)
+                results.append((team2_rating, 350, score))
+            
+            new_rating, new_rd, new_vol = glicko.update_rating(results)
+            old_rating = player['rating']
+            rating_change = new_rating - old_rating
+            
+            changes[player['telegram_id']] = {
+                'old_rating': old_rating,
+                'new_rating': new_rating,
+                'rating_change': rating_change,
+                'team': 1,
+                'won': team1_won
+            }
+            
+            # Обновляем рейтинг в базе
+            player['rating'] = new_rating
+    
+    # Обрабатываем команду 2
+    if team2_players:
+        team2_rating = calculate_team_rating(team2_players, team2_won)
+        
+        for player in team2_players:
+            glicko = Glicko2Rating(player['rating'], 350, 0.06)
+            
+            # Создаем результаты против команды 1
+            results = []
+            if team1_players:
+                team1_rating = calculate_team_rating(team1_players, team1_won)
+                score = 1 if team2_won else (0.5 if not team1_won and not team2_won else 0)
+                results.append((team1_rating, 350, score))
+            
+            new_rating, new_rd, new_vol = glicko.update_rating(results)
+            old_rating = player['rating']
+            rating_change = new_rating - old_rating
+            
+            changes[player['telegram_id']] = {
+                'old_rating': old_rating,
+                'new_rating': new_rating,
+                'rating_change': rating_change,
+                'team': 2,
+                'won': team2_won
+            }
+            
+            # Обновляем рейтинг в базе
+            player['rating'] = new_rating
+    
+    return changes
 
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -308,6 +493,43 @@ class handler(BaseHTTPRequestHandler):
                 else:
                     self.send_response(404)
                     response = {"error": "Комната не найдена"}
+                    
+            elif path.startswith('/rooms/') and path.endswith('/finish-game'):
+                # Завершение игры и подсчет рейтинга
+                room_id = int(path.split('/')[-2])
+                
+                if room_id not in rooms_db:
+                    self.send_response(404)
+                    response = {"error": "Комната не найдена"}
+                else:
+                    room = rooms_db[room_id]
+                    
+                    # Проверяем что в комнате 2 или 4 игрока
+                    if len(room['members']) not in [2, 4]:
+                        self.send_response(400)
+                        response = {"error": "Для завершения игры нужно 2 или 4 игрока"}
+                    else:
+                        # Получаем данные счета
+                        score_data = data
+                        
+                        # Вычисляем изменения рейтинга
+                        rating_changes = calculate_rating_changes(room, score_data)
+                        
+                        # Обновляем комнату - игра завершена
+                        room['game_finished'] = True
+                        room['final_score'] = {
+                            'team1': score_data['score1'],
+                            'team2': score_data['score2']
+                        }
+                        room['rating_changes'] = rating_changes
+                        room['finished_at'] = datetime.now().isoformat()
+                        
+                        response = {
+                            "message": "Игра завершена!",
+                            "room": room,
+                            "rating_changes": rating_changes
+                        }
+                        
             else:
                 self.send_response(404)
                 response = {"error": "Endpoint not found"}
