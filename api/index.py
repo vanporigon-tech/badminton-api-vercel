@@ -547,3 +547,9 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
+
+if __name__ == '__main__':
+    from http.server import HTTPServer
+    server = HTTPServer(('localhost', 8000), handler)
+    print('🚀 API сервер запущен на http://localhost:8000')
+    server.serve_forever()
