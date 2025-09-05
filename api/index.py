@@ -9,6 +9,12 @@ players_db = {}
 rooms_db = {}
 room_counter = 1
 
+# Данные турниров
+tournaments_db = {}
+tournament_games = {}
+tournament_counter = 0
+current_tournament = None
+
 # Система рейтинга Glicko-2 для бадминтона
 class Glicko2Rating:
     def __init__(self, rating=1500, rd=350, vol=0.06):
@@ -274,78 +280,91 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers()
         
         try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
+            content_length_str = self.headers.get('Content-Length')
+            content_length = int(content_length_str) if content_length_str else 0
+            if content_length > 0:
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode('utf-8'))
+            else:
+                data = {}
             
             path = self.path.split('?')[0]
+            print(f"🔍 POST запрос: {path}, data: {data}")
             
             if path == '/players/':
                 # Создание/обновление игрока
-                telegram_id = data['telegram_id']
-                player = {
-                    "id": telegram_id,
-                    "telegram_id": telegram_id,
-                    "first_name": data['first_name'],
-                    "last_name": data.get('last_name'),
-                    "username": data.get('username'),
-                    "rating": 1500
-                }
-                players_db[telegram_id] = player
-                response = player
+                if 'telegram_id' not in data:
+                    self.send_response(400)
+                    response = {"error": "telegram_id required"}
+                else:
+                    telegram_id = data['telegram_id']
+                    player = {
+                        "id": telegram_id,
+                        "telegram_id": telegram_id,
+                        "first_name": data['first_name'],
+                        "last_name": data.get('last_name'),
+                        "username": data.get('username'),
+                        "rating": 1500
+                    }
+                    players_db[telegram_id] = player
+                    response = player
                 
             elif path == '/rooms/':
                 # Создание комнаты
-                creator_id = data['creator_telegram_id']
-                
-                # ПРОВЕРЯЕМ НЕ СОЗДАЛ ЛИ УЖЕ КОМНАТУ
-                existing_room = None
-                for room_id, room in rooms_db.items():
-                    if room['creator_id'] == creator_id:
-                        existing_room = room_id
-                        break
-                
-                if existing_room:
+                if 'creator_telegram_id' not in data:
                     self.send_response(400)
-                    response = {"error": f"Вы уже создали комнату #{existing_room}. Можно создать только одну комнату."}
+                    response = {"error": "creator_telegram_id required"}
                 else:
-                    # Создаем игрока если его нет
-                    if creator_id not in players_db:
-                        players_db[creator_id] = {
-                            "id": creator_id,
-                            "telegram_id": creator_id,
-                            "first_name": "Игрок",
-                            "last_name": f"{creator_id}",
-                            "username": None,
-                            "rating": 1500
-                        }
-                
-                    creator = players_db[creator_id]
-                    creator_full_name = f"{creator['first_name']} {creator.get('last_name', '')}".strip()
+                    creator_id = data['creator_telegram_id']
                     
-                    # Создаем комнату
-                    new_room = {
-                        "id": room_counter,
-                        "name": data['name'],
-                        "creator_id": creator_id,
-                        "creator_full_name": creator_full_name,
-                        "max_players": data.get('max_players', 4),
-                        "member_count": 1,
-                        "is_active": True,
-                        "created_at": datetime.now().isoformat(),
-                        "members": [
-                            {
-                                "id": 1,
-                                "player": creator,
-                                "is_leader": True,
-                                "joined_at": datetime.now().isoformat()
+                    # ПРОВЕРЯЕМ НЕ СОЗДАЛ ЛИ УЖЕ КОМНАТУ
+                    existing_room = None
+                    for room_id, room in rooms_db.items():
+                        if room['creator_id'] == creator_id:
+                            existing_room = room_id
+                            break
+                    
+                    if existing_room:
+                        self.send_response(400)
+                        response = {"error": f"Вы уже создали комнату #{existing_room}. Можно создать только одну комнату."}
+                    else:
+                        # Создаем игрока если его нет
+                        if creator_id not in players_db:
+                            players_db[creator_id] = {
+                                "id": creator_id,
+                                "telegram_id": creator_id,
+                                "first_name": "Игрок",
+                                "last_name": f"{creator_id}",
+                                "username": None,
+                                "rating": 1500
                             }
-                        ]
-                    }
                     
-                    rooms_db[room_counter] = new_room
-                    room_counter += 1
-                    response = new_room
+                        creator = players_db[creator_id]
+                        creator_full_name = f"{creator['first_name']} {creator.get('last_name', '')}".strip()
+                        
+                        # Создаем комнату
+                        new_room = {
+                            "id": room_counter,
+                            "name": data['name'],
+                            "creator_id": creator_id,
+                            "creator_full_name": creator_full_name,
+                            "max_players": data.get('max_players', 4),
+                            "member_count": 1,
+                            "is_active": True,
+                            "created_at": datetime.now().isoformat(),
+                            "members": [
+                                {
+                                    "id": 1,
+                                    "player": creator,
+                                    "is_leader": True,
+                                    "joined_at": datetime.now().isoformat()
+                                }
+                            ]
+                        }
+                        
+                        rooms_db[room_counter] = new_room
+                        room_counter += 1
+                        response = new_room
                 
             elif path.startswith('/rooms/') and path.endswith('/join'):
                 # Присоединение к комнате
@@ -524,11 +543,36 @@ class handler(BaseHTTPRequestHandler):
                         room['rating_changes'] = rating_changes
                         room['finished_at'] = datetime.now().isoformat()
                         
+                        # Записываем игру в турнир, если он активен
+                        if current_tournament is not None:
+                            game_data = {
+                                "tournament_id": current_tournament,
+                                "room_id": room_id,
+                                "timestamp": datetime.now().isoformat(),
+                                "team1": score_data['team1'],
+                                "team2": score_data['team2'],
+                                "score1": score_data['score1'],
+                                "score2": score_data['score2'],
+                                "rating_changes": rating_changes
+                            }
+                            tournament_games[current_tournament].append(game_data)
+                        
                         response = {
                             "message": "Игра завершена!",
                             "room": room,
                             "rating_changes": rating_changes
                         }
+                        
+            elif path == '/tournament/start':
+                # Начать турнир
+                response = self.start_tournament()
+            elif path == '/tournament/end':
+                # Завершить турнир
+                response = self.end_tournament()
+            elif path.startswith('/tournament/'):
+                # Получение данных турнира
+                tournament_id = int(path.split('/')[-1])
+                response = self.get_tournament_data(tournament_id)
                         
             else:
                 self.send_response(404)
@@ -539,6 +583,59 @@ class handler(BaseHTTPRequestHandler):
             response = {"error": str(e)}
         
         self.wfile.write(json.dumps(response, ensure_ascii=False).encode('utf-8'))
+    
+    def start_tournament(self):
+        """Начать турнир"""
+        global tournament_counter, current_tournament
+        
+        tournament_counter += 1
+        current_tournament = tournament_counter
+        
+        tournaments_db[current_tournament] = {
+            "id": current_tournament,
+            "start_time": datetime.now().isoformat(),
+            "status": "active"
+        }
+        
+        tournament_games[current_tournament] = []
+        
+        return {
+            "message": f"Турнир #{current_tournament} начат!",
+            "tournament_id": current_tournament
+        }
+    
+    def end_tournament(self):
+        """Завершить турнир"""
+        global current_tournament
+        
+        if current_tournament is None:
+            return {"error": "Нет активного турнира"}
+        
+        tournament_id = current_tournament
+        tournaments_db[tournament_id]["status"] = "finished"
+        tournaments_db[tournament_id]["end_time"] = datetime.now().isoformat()
+        
+        current_tournament = None
+        
+        return {
+            "message": f"Турнир #{tournament_id} завершен!",
+            "tournament_id": tournament_id
+        }
+    
+    def get_tournament_data(self, tournament_id):
+        """Получить данные турнира"""
+        if tournament_id not in tournaments_db:
+            return {"error": "Турнир не найден"}
+        
+        tournament = tournaments_db[tournament_id]
+        games = tournament_games.get(tournament_id, [])
+        
+        return {
+            "tournament_id": tournament_id,
+            "tournament": tournament,
+            "games": games,
+            "message": f"Данные турнира #{tournament_id}"
+        }
     
     def do_OPTIONS(self):
         """Обработка OPTIONS запросов для CORS"""

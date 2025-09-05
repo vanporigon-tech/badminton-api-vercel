@@ -20,6 +20,7 @@ MINI_APP_URL = os.getenv('MINI_APP_URL', 'https://vanporigon-tech.github.io/badm
 ADMIN_CHAT_ID = 972717950
 
 
+
 def get_db_session():
     """Получить сессию базы данных"""
     return SessionLocal()
@@ -188,6 +189,67 @@ def handle_admin_clear_rooms(chat_id):
     
     return send_message(chat_id, success_message)
 
+def handle_start_tournament(chat_id):
+    """Начать турнир"""
+    if chat_id != ADMIN_CHAT_ID:
+        return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
+    
+    try:
+        # Отправляем запрос в API для начала турнира
+        response = requests.post("http://localhost:8000/tournament/start")
+        
+        if response.status_code == 200:
+            data = response.json()
+            tournament_id = data.get('tournament_id')
+            response_text = f"🏆 Турнир #{tournament_id} начат!\n\nВсе игры будут записываться в турнир до команды /end_tournament"
+        else:
+            response_text = f"❌ Ошибка начала турнира: {response.status_code}"
+            
+        return send_message(chat_id, response_text)
+        
+    except Exception as e:
+        print(f"❌ Ошибка при начале турнира: {e}")
+        return send_message(chat_id, f"❌ Ошибка при начале турнира: {str(e)}")
+
+def handle_end_tournament(chat_id):
+    """Завершить турнир и отправить таблицу"""
+    if chat_id != ADMIN_CHAT_ID:
+        return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
+    
+    try:
+        # Завершаем турнир в API
+        response = requests.post("http://localhost:8000/tournament/end")
+        
+        if response.status_code == 200:
+            data = response.json()
+            tournament_id = data.get('tournament_id')
+            
+            # Получаем данные турнира
+            data_response = requests.get(f"http://localhost:8000/tournament/{tournament_id}")
+            
+            if data_response.status_code == 200:
+                tournament_data = data_response.json()
+                
+                # Создаем Google Таблицу
+                table_url = create_tournament_table(tournament_id, tournament_data)
+                
+                response_text = f"🏆 Турнир #{tournament_id} завершен!\n\n📊 Результаты: {table_url}"
+            else:
+                response_text = f"🏆 Турнир #{tournament_id} завершен!\n\n❌ Ошибка получения данных: {data_response.status_code}"
+        else:
+            response_text = f"❌ Ошибка завершения турнира: {response.status_code}"
+            
+        return send_message(chat_id, response_text)
+        
+    except Exception as e:
+        print(f"❌ Ошибка при завершении турнира: {e}")
+        return send_message(chat_id, f"❌ Ошибка при завершении турнира: {str(e)}")
+
+def create_tournament_table(tournament_id, data):
+    """Создать Google Таблицу с результатами турнира"""
+    from google_sheets import create_tournament_table as create_sheets_table
+    return create_sheets_table(tournament_id, data)
+
 def process_update(update):
     """Обработка обновления от Telegram"""
     try:
@@ -206,6 +268,10 @@ def process_update(update):
                     return handle_start_command(chat_id, first_name, last_name)
                 elif text == "/admin_clear_rooms":
                     return handle_admin_clear_rooms(chat_id)
+                elif text == "/start_tournament":
+                    return handle_start_tournament(chat_id)
+                elif text == "/end_tournament":
+                    return handle_end_tournament(chat_id)
                 else:
                     # Игнорируем все остальные команды
                     return True
