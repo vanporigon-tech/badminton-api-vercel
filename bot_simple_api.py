@@ -196,7 +196,7 @@ def handle_start_tournament(chat_id):
     
     try:
         # Отправляем запрос в API для начала турнира
-        response = requests.post("http://localhost:8000/tournament/start")
+        response = requests.post("https://badminton-api-vercel.vercel.app/tournament/start")
         
         if response.status_code == 200:
             data = response.json()
@@ -218,14 +218,14 @@ def handle_end_tournament(chat_id):
     
     try:
         # Завершаем турнир в API
-        response = requests.post("http://localhost:8000/tournament/end")
+        response = requests.post("https://badminton-api-vercel.vercel.app/tournament/end")
         
         if response.status_code == 200:
             data = response.json()
             tournament_id = data.get('tournament_id')
             
             # Получаем данные турнира
-            data_response = requests.get(f"http://localhost:8000/tournament/{tournament_id}")
+            data_response = requests.get(f"https://badminton-api-vercel.vercel.app/tournament/{tournament_id}")
             
             if data_response.status_code == 200:
                 tournament_data = data_response.json()
