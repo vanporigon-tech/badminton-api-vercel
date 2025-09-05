@@ -19,8 +19,6 @@ BOT_TOKEN = os.getenv('BOT_TOKEN', '8401405889:AAEGFi1tCX6k2m4MyGBoAY3MdJC63SXFb
 MINI_APP_URL = os.getenv('MINI_APP_URL', 'https://vanporigon-tech.github.io/badminton-rating-app')
 ADMIN_CHAT_ID = 972717950
 
-# Состояния пользователей
-user_states = {}
 
 def get_db_session():
     """Получить сессию базы данных"""
@@ -129,15 +127,9 @@ def handle_start_command(chat_id, first_name, last_name=""):
     player_info = get_or_create_player(chat_id, first_name, last_name)
     display_name = player_info['full_name'] if player_info else first_name
     
-    # Создаем клавиатуру с двумя кнопками
+    # Создаем клавиатуру с кнопкой запуска игры
     keyboard = {
         "inline_keyboard": [
-            [
-                {
-                    "text": "✏️ Изменить инициалы",
-                    "callback_data": "change_initials"
-                }
-            ],
             [
                 {
                     "text": "🏸 Начать игру",
@@ -155,45 +147,9 @@ def handle_start_command(chat_id, first_name, last_name=""):
 
 def handle_callback_query(chat_id, callback_data):
     """Обработка callback запросов от кнопок"""
-    if callback_data == "change_initials":
-        # Устанавливаем состояние пользователя
-        user_states[chat_id] = "waiting_for_name"
-        
-        # Запрашиваем имя и фамилию
-        response_text = "✏️ Отправьте ваше имя и фамилию в одном сообщении"
-        
-        return send_message(chat_id, response_text)
-    
+    # Все callback запросы обрабатываются в мини-приложении
     return False
 
-def handle_name_input(chat_id, text, first_name):
-    """Обработка ввода имени и фамилии"""
-    print(f"✏️ Обрабатываю ввод имени для {first_name}")
-    
-    # Парсим введенное имя и фамилию
-    parts = text.strip().split()
-    
-    if len(parts) < 2:
-        error_text = "❌ Введите имя и фамилию"
-        return send_message(chat_id, error_text)
-    
-    # Извлекаем имя и фамилию
-    new_first_name = parts[0]
-    new_last_name = ' '.join(parts[1:])  # Фамилия может состоять из нескольких слов
-    
-    # Обновляем имя в базе данных
-    player_info = get_or_create_player(chat_id, new_first_name, new_last_name)
-    
-    if player_info:
-        success_text = f"✅ Имя обновлено: {player_info['full_name']}"
-    else:
-        success_text = f"✅ Имя сохранено: {new_first_name} {new_last_name}"
-    
-    # Сбрасываем состояние пользователя
-    if chat_id in user_states:
-        del user_states[chat_id]
-    
-    return send_message(chat_id, success_text)
 
 def handle_admin_clear_rooms(chat_id):
     """Админская команда очистки комнат (скрытая)"""
@@ -250,9 +206,6 @@ def process_update(update):
                     return handle_start_command(chat_id, first_name, last_name)
                 elif text == "/admin_clear_rooms":
                     return handle_admin_clear_rooms(chat_id)
-                elif chat_id in user_states and user_states[chat_id] == "waiting_for_name":
-                    # Пользователь вводит имя и фамилию
-                    return handle_name_input(chat_id, text, first_name)
                 else:
                     # Игнорируем все остальные команды
                     return True
