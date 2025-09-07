@@ -212,6 +212,9 @@ class handler(BaseHTTPRequestHandler):
             
             path = self.path.split('?')[0]
             print(f"🔍 POST запрос: {path}, data: {data}")
+            print(f"🔍 Проверка join: {'/join' in path}")
+            print(f"🔍 Проверка leave: {'/leave' in path}")
+            print(f"🔍 Проверка finish-game: {'/finish-game' in path}")
             
             if path == '/players/':
                 # Создание/обновление игрока
@@ -320,6 +323,109 @@ class handler(BaseHTTPRequestHandler):
                     response = {
                         "message": f"Турнир #{tournament_id} завершен!",
                         "tournament_id": tournament_id
+                    }
+                    
+            elif '/join' in path:
+                # Присоединение к комнате
+                room_id = int(path.split('/')[2])
+                if room_id not in rooms_db:
+                    self.send_response(404)
+                    response = {"error": "Комната не найдена"}
+                else:
+                    room = rooms_db[room_id]
+                    
+                    # Проверяем не полная ли комната
+                    if room['member_count'] >= room['max_players']:
+                        self.send_response(400)
+                        response = {"error": "Комната заполнена"}
+                    else:
+                        # Создаем игрока если его нет
+                        telegram_id = data['telegram_id']
+                        if telegram_id not in players_db:
+                            players_db[telegram_id] = {
+                                "id": telegram_id,
+                                "telegram_id": telegram_id,
+                                "first_name": data['first_name'],
+                                "last_name": data.get('last_name', ''),
+                                "username": data.get('username'),
+                                "rating": 1500
+                            }
+                        
+                        player = players_db[telegram_id]
+                        
+                        # Добавляем игрока в комнату
+                        new_member = {
+                            "id": room['member_count'] + 1,
+                            "player": player,
+                            "is_leader": False,
+                            "joined_at": datetime.now().isoformat()
+                        }
+                        
+                        room['members'].append(new_member)
+                        room['member_count'] += 1
+                        
+                        response = {
+                            "message": "Успешно присоединились к комнате",
+                            "room": room
+                        }
+                        
+            elif '/leave' in path:
+                # Выход из комнаты
+                room_id = int(path.split('/')[2])
+                if room_id not in rooms_db:
+                    self.send_response(404)
+                    response = {"error": "Комната не найдена"}
+                else:
+                    room = rooms_db[room_id]
+                    telegram_id = data['telegram_id']
+                    
+                    # Удаляем игрока из комнаты
+                    room['members'] = [m for m in room['members'] if m['player']['telegram_id'] != telegram_id]
+                    room['member_count'] = len(room['members'])
+                    
+                    # Если комната пустая, удаляем её
+                    if room['member_count'] == 0:
+                        del rooms_db[room_id]
+                        response = {
+                            "message": "Комната расформирована",
+                            "room_disbanded": True
+                        }
+                    else:
+                        response = {
+                            "message": "Вы покинули комнату",
+                            "room": room,
+                            "room_disbanded": False
+                        }
+                        
+            elif '/finish-game' in path:
+                # Завершение игры
+                room_id = int(path.split('/')[2])
+                if room_id not in rooms_db:
+                    self.send_response(404)
+                    response = {"error": "Комната не найдена"}
+                else:
+                    room = rooms_db[room_id]
+                    
+                    # Вычисляем изменения рейтинга
+                    rating_changes = calculate_rating_changes(room, data)
+                    
+                    # Сохраняем игру в турнир если он активен
+                    if current_tournament:
+                        game_data = {
+                            "room_id": room_id,
+                            "team1": data['team1'],
+                            "team2": data['team2'],
+                            "score1": data['score1'],
+                            "score2": data['score2'],
+                            "rating_changes": rating_changes,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        tournament_games[current_tournament].append(game_data)
+                    
+                    response = {
+                        "message": "Игра завершена",
+                        "room": room,
+                        "rating_changes": rating_changes
                     }
                     
             elif path.startswith('/tournament/'):
