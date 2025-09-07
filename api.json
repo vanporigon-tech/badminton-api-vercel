@@ -1,0 +1,7 @@
+{
+  "message": "Badminton Rating API",
+  "status": "active",
+  "database": "memory",
+  "players": 0,
+  "rooms": []
+}

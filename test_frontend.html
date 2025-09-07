@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест синхронизации комнат</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .room {
+            border: 1px solid #ddd;
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 5px;
+            background: #f9f9f9;
+        }
+        .room-name {
+            font-weight: bold;
+            font-size: 18px;
+            color: #333;
+        }
+        .room-info {
+            color: #666;
+            margin: 5px 0;
+        }
+        .members {
+            margin-top: 10px;
+        }
+        .member {
+            display: inline-block;
+            background: #e3f2fd;
+            padding: 5px 10px;
+            margin: 2px;
+            border-radius: 15px;
+            font-size: 14px;
+        }
+        .leader {
+            background: #ffd54f;
+        }
+        .error {
+            color: red;
+            background: #ffebee;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .success {
+            color: green;
+            background: #e8f5e8;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #1976D2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Тест синхронизации комнат</h1>
+        
+        <div id="status"></div>
+        
+        <button onclick="loadRooms()">🔄 Обновить список комнат</button>
+        <button onclick="createTestRoom()">➕ Создать тестовую комнату</button>
+        
+        <div id="rooms-list"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:8000';
+        
+        function showStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = `<div class="${type}">${message}</div>`;
+        }
+        
+        async function loadRooms() {
+            showStatus('🔄 Загружаем комнаты...', 'info');
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/rooms/`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const rooms = await response.json();
+                
+                if (rooms.length === 0) {
+                    showStatus('❌ Комнаты не найдены', 'error');
+                    return;
+                }
+                
+                showStatus(`✅ Загружено ${rooms.length} комнат`, 'success');
+                displayRooms(rooms);
+                
+            } catch (error) {
+                console.error('Ошибка загрузки комнат:', error);
+                showStatus(`❌ Ошибка: ${error.message}`, 'error');
+            }
+        }
+        
+        function displayRooms(rooms) {
+            const roomsList = document.getElementById('rooms-list');
+            
+            if (rooms.length === 0) {
+                roomsList.innerHTML = '<p>Нет доступных комнат</p>';
+                return;
+            }
+            
+            const roomsHtml = rooms.map(room => {
+                const membersHtml = room.members.map(member => {
+                    const player = member.player;
+                    const name = `${player.first_name} ${player.last_name}`.trim();
+                    const leaderClass = member.is_leader ? 'leader' : '';
+                    return `<span class="member ${leaderClass}">${member.is_leader ? '👑 ' : ''}${name}</span>`;
+                }).join('');
+                
+                return `
+                    <div class="room">
+                        <div class="room-name">${room.name}</div>
+                        <div class="room-info">ID: ${room.id} | Участников: ${room.member_count}/${room.max_players}</div>
+                        <div class="room-info">Создатель: ${room.creator_full_name}</div>
+                        <div class="members">${membersHtml}</div>
+                    </div>
+                `;
+            }).join('');
+            
+            roomsList.innerHTML = roomsHtml;
+        }
+        
+        async function createTestRoom() {
+            showStatus('🔄 Создаем тестовую комнату...', 'info');
+            
+            try {
+                const roomData = {
+                    name: `Тестовая комната ${Date.now()}`,
+                    creator_telegram_id: Math.floor(Math.random() * 1000000),
+                    max_players: 4
+                };
+                
+                const response = await fetch(`${API_BASE_URL}/rooms/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(roomData)
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(`HTTP ${response.status}: ${errorData.error || response.statusText}`);
+                }
+                
+                const room = await response.json();
+                showStatus(`✅ Комната создана: ${room.name}`, 'success');
+                
+                // Обновляем список комнат
+                loadRooms();
+                
+            } catch (error) {
+                console.error('Ошибка создания комнаты:', error);
+                showStatus(`❌ Ошибка: ${error.message}`, 'error');
+            }
+        }
+        
+        // Загружаем комнаты при загрузке страницы
+        window.addEventListener('load', loadRooms);
+    </script>
+</body>
+</html>
