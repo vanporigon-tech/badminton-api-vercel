@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🏸 Финальный тест синхронизации</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255,255,255,0.1);
+            padding: 30px;
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        .room {
+            border: 2px solid rgba(255,255,255,0.3);
+            margin: 15px 0;
+            padding: 20px;
+            border-radius: 15px;
+            background: rgba(255,255,255,0.1);
+            transition: all 0.3s ease;
+        }
+        .room:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+        .room-name {
+            font-weight: bold;
+            font-size: 24px;
+            color: #fff;
+            margin-bottom: 10px;
+        }
+        .room-info {
+            color: rgba(255,255,255,0.8);
+            margin: 8px 0;
+            font-size: 16px;
+        }
+        .members {
+            margin-top: 15px;
+        }
+        .member {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 15px;
+            margin: 5px;
+            border-radius: 20px;
+            font-size: 14px;
+            border: 1px solid rgba(255,255,255,0.3);
+        }
+        .leader {
+            background: linear-gradient(45deg, #ffd700, #ffed4e);
+            color: #333;
+            font-weight: bold;
+        }
+        .error {
+            color: #ff6b6b;
+            background: rgba(255,107,107,0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border: 1px solid rgba(255,107,107,0.3);
+        }
+        .success {
+            color: #51cf66;
+            background: rgba(81,207,102,0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border: 1px solid rgba(81,207,102,0.3);
+        }
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            cursor: pointer;
+            margin: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+        h1 {
+            text-align: center;
+            font-size: 36px;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .status {
+            text-align: center;
+            font-size: 18px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🏸 Финальный тест синхронизации</h1>
+        
+        <div id="status" class="status">🔄 Загружаем комнаты...</div>
+        
+        <div style="text-align: center;">
+            <button onclick="loadRooms()">🔄 Обновить список комнат</button>
+            <button onclick="createTestRoom()">➕ Создать тестовую комнату</button>
+        </div>
+        
+        <div id="rooms-list"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'https://raw.githubusercontent.com/vanporigon-tech/badminton-api-vercel/main';
+        
+        function showStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML = `<div class="${type}">${message}</div>`;
+        }
+        
+        async function loadRooms() {
+            showStatus('🔄 Загружаем комнаты из GitHub...', 'info');
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/rooms.json`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const rooms = await response.json();
+                
+                if (rooms.length === 0) {
+                    showStatus('❌ Комнаты не найдены', 'error');
+                    return;
+                }
+                
+                showStatus(`✅ Загружено ${rooms.length} комнат из GitHub!`, 'success');
+                displayRooms(rooms);
+                
+            } catch (error) {
+                console.error('Ошибка загрузки комнат:', error);
+                showStatus(`❌ Ошибка: ${error.message}`, 'error');
+            }
+        }
+        
+        function displayRooms(rooms) {
+            const roomsList = document.getElementById('rooms-list');
+            
+            if (rooms.length === 0) {
+                roomsList.innerHTML = '<p>Нет доступных комнат</p>';
+                return;
+            }
+            
+            const roomsHtml = rooms.map(room => {
+                const membersHtml = room.members.map(member => {
+                    const player = member.player;
+                    const name = `${player.first_name} ${player.last_name}`.trim();
+                    const leaderClass = member.is_leader ? 'leader' : '';
+                    return `<span class="member ${leaderClass}">${member.is_leader ? '👑 ' : ''}${name}</span>`;
+                }).join('');
+                
+                return `
+                    <div class="room">
+                        <div class="room-name">${room.name}</div>
+                        <div class="room-info">ID: ${room.id} | Участников: ${room.member_count}/${room.max_players}</div>
+                        <div class="room-info">Создатель: ${room.creator_full_name}</div>
+                        <div class="members">${membersHtml}</div>
+                    </div>
+                `;
+            }).join('');
+            
+            roomsList.innerHTML = roomsHtml;
+        }
+        
+        async function createTestRoom() {
+            showStatus('🔄 Создаем тестовую комнату...', 'info');
+            
+            // Создаем комнату локально (так как GitHub не поддерживает POST)
+            const roomData = {
+                id: Date.now(),
+                name: `Тестовая комната ${new Date().toLocaleTimeString()}`,
+                creator_id: Math.floor(Math.random() * 1000000),
+                creator_full_name: "Тестовый игрок",
+                max_players: 4,
+                member_count: 1,
+                is_active: true,
+                created_at: new Date().toISOString(),
+                members: [{
+                    id: 1,
+                    player: {
+                        id: Math.floor(Math.random() * 1000000),
+                        telegram_id: Math.floor(Math.random() * 1000000),
+                        first_name: "Тестовый",
+                        last_name: "Игрок",
+                        username: "test_player",
+                        rating: 1500
+                    },
+                    is_leader: true,
+                    joined_at: new Date().toISOString()
+                }]
+            };
+            
+            // Сохраняем в localStorage
+            const existingRooms = JSON.parse(localStorage.getItem('badminton_local_rooms') || '[]');
+            existingRooms.push(roomData);
+            localStorage.setItem('badminton_local_rooms', JSON.stringify(existingRooms));
+            
+            showStatus(`✅ Комната создана локально: ${roomData.name}`, 'success');
+            
+            // Обновляем список комнат
+            loadRooms();
+        }
+        
+        // Загружаем комнаты при загрузке страницы
+        window.addEventListener('load', loadRooms);
+    </script>
+</body>
+</html>
+
