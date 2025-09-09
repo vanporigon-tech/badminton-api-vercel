@@ -5,11 +5,8 @@ import requests
 import json
 import time
 import os
+import sqlite3
 from dotenv import load_dotenv
-from sqlalchemy.orm import Session
-from database_sqlite import get_db, SessionLocal
-from crud_sqlite import get_player_by_telegram_id, create_player
-from schemas import PlayerCreate
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -21,55 +18,7 @@ ADMIN_CHAT_ID = 972717950
 
 
 
-def get_db_session():
-    """Получить сессию базы данных"""
-    return SessionLocal()
-
-def get_or_create_player(telegram_id: int, first_name: str, last_name: str = "") -> dict:
-    """Получить или создать игрока в базе данных"""
-    db = get_db_session()
-    try:
-        # Попытаться найти существующего игрока
-        player = get_player_by_telegram_id(db, telegram_id)
-        
-        if player:
-            # Обновить имя если оно изменилось
-            if first_name and (player.first_name != first_name or player.last_name != last_name):
-                player.first_name = first_name
-                if last_name:  # Обновляем фамилию только если она передана
-                    player.last_name = last_name
-                db.commit()
-                db.refresh(player)
-            return {
-                'id': player.id,
-                'telegram_id': player.telegram_id,
-                'first_name': player.first_name,
-                'last_name': player.last_name,
-                'full_name': f"{player.first_name} {player.last_name}"
-            }
-        else:
-            # Создать нового игрока
-            if not last_name:
-                last_name = "Неуказано"  # Значение по умолчанию
-            
-            player_data = PlayerCreate(
-                telegram_id=telegram_id,
-                first_name=first_name,
-                last_name=last_name
-            )
-            new_player = create_player(db, player_data)
-            return {
-                'id': new_player.id,
-                'telegram_id': new_player.telegram_id,
-                'first_name': new_player.first_name,
-                'last_name': new_player.last_name,
-                'full_name': f"{new_player.first_name} {new_player.last_name}"
-            }
-    except Exception as e:
-        print(f"❌ Ошибка работы с базой данных: {str(e)}")
-        return None
-    finally:
-        db.close()
+# Функции для работы с игроками удалены - по ТЗ данные хранятся в localStorage фронтенда
 
 def send_message(chat_id, text, reply_markup=None):
     """Отправка сообщения в чат"""
