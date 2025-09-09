@@ -101,7 +101,11 @@ def setup_bot_commands():
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands"
     
     commands = [
-        {"command": "start", "description": "Запустить бота"}
+        {"command": "start", "description": "Запустить бота"},
+        {"command": "help", "description": "Показать справку"},
+        {"command": "clear_rooms", "description": "Очистить все комнаты (только админ)"},
+        {"command": "start_tournament", "description": "Начать турнир (только админ)"},
+        {"command": "end_tournament", "description": "Завершить турнир (только админ)"}
     ]
     
     data = {
@@ -112,6 +116,9 @@ def setup_bot_commands():
         response = requests.post(url, json=data)
         if response.status_code == 200:
             print("✅ Команды бота настроены")
+            print("📋 Доступные команды:")
+            for cmd in commands:
+                print(f"  /{cmd['command']} - {cmd['description']}")
             return True
         else:
             print(f"❌ Ошибка настройки команд: {response.status_code}")
@@ -145,6 +152,43 @@ def handle_start_command(chat_id, first_name, last_name=""):
     welcome_text = f"Привет, {display_name}! 👋"
     
     return send_message(chat_id, welcome_text, keyboard)
+
+def handle_help_command(chat_id):
+    """Обработка команды /help"""
+    print(f"❓ Обрабатываю команду /help для чата {chat_id}")
+    
+    help_text = """
+🏸 <b>Справка по боту</b>
+
+🎮 <b>Основные команды:</b>
+/start - Запустить бота и открыть приложение
+/help - Показать эту справку
+
+👑 <b>Админские команды:</b>
+/clear_rooms - Очистить все комнаты
+/start_tournament - Начать турнир
+/end_tournament - Завершить турнир
+
+🌐 <b>Приложение:</b>
+https://vanporigon-tech.github.io/badminton-rating-app
+
+📊 <b>Система рейтинга:</b>
+• Glicko-2 алгоритм
+• Начальный рейтинг: 1500
+• Поддержка 1v1 и 2v2 игр
+• Автоматический расчет изменений
+
+🏆 <b>Турниры:</b>
+• Автоматическая запись всех игр
+• Статистика участников
+• Рейтинговая таблица
+• Google Sheets интеграция
+
+❓ <b>Помощь:</b>
+Если у вас есть вопросы, обратитесь к администратору.
+    """
+    
+    return send_message(chat_id, help_text)
 
 def handle_callback_query(chat_id, callback_data):
     """Обработка callback запросов от кнопок"""
@@ -266,6 +310,8 @@ def process_update(update):
                 
                 if text == "/start":
                     return handle_start_command(chat_id, first_name, last_name)
+                elif text == "/help":
+                    return handle_help_command(chat_id)
                 elif text == "/admin_clear_rooms":
                     return handle_admin_clear_rooms(chat_id)
                 elif text == "/start_tournament":
