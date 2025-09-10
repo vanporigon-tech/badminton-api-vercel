@@ -60,3 +60,6 @@ logs/
 
 # Frontend отдельно (GitHub Pages)
 # badminton-rating-app/
+# Credentials
+credentials/
+*.json
