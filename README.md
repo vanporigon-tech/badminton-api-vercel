@@ -24,6 +24,12 @@
 uvicorn main:app --reload --port 8000
 ```
 
+### Локальная PostgreSQL через Docker
+```bash
+docker compose up -d
+# DATABASE_URL по умолчанию: postgresql://badminton:badminton@localhost:5433/badminton
+```
+
 ### Запуск фронтенда
 ```bash
 cd badminton-rating-app
