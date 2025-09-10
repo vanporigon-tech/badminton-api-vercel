@@ -1,31 +1,306 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import os
 import json
-import requests
+from typing import List
 from datetime import datetime
 
+from dotenv import load_dotenv
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from google.oauth2 import service_account
+
+load_dotenv()
+
+# Scopes: Sheets read/write + Drive for sharing
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+
+
+def _load_credentials():
+    """Load service account credentials from env or default path."""
+    service_file = os.getenv(
+        "GOOGLE_SERVICE_ACCOUNT_FILE",
+        "credentials/gobadminminiapp-694c0da69053.json",
+    )
+    if not os.path.isfile(service_file):
+        raise FileNotFoundError(
+            f"Service account file not found: {service_file}. Set GOOGLE_SERVICE_ACCOUNT_FILE."
+        )
+    creds = service_account.Credentials.from_service_account_file(
+        service_file, scopes=SCOPES
+    )
+    return creds
+
+
+def _get_services():
+    """Create Sheets and Drive API clients."""
+    creds = _load_credentials()
+    sheets = build("sheets", "v4", credentials=creds)
+    drive = build("drive", "v3", credentials=creds)
+    return sheets, drive
+
+
+def _share_spreadsheet(drive_service, spreadsheet_id: str, emails: List[str]):
+    """Share spreadsheet with provided emails as editors."""
+    for email in filter(None, [e.strip() for e in emails]):
+        try:
+            drive_service.permissions().create(
+                fileId=spreadsheet_id,
+                body={"type": "user", "role": "writer", "emailAddress": email},
+                sendNotificationEmail=False,
+            ).execute()
+        except HttpError:
+            # Continue on share errors to not break main flow
+            continue
+
+
+def _move_file_to_folder(drive_service, file_id: str, folder_id: str):
+    if not folder_id:
+        return
+    try:
+        file = drive_service.files().get(fileId=file_id, fields="parents").execute()
+        previous_parents = ",".join(file.get("parents", []))
+        drive_service.files().update(
+            fileId=file_id,
+            addParents=folder_id,
+            removeParents=previous_parents,
+            fields="id, parents",
+        ).execute()
+    except HttpError:
+        pass
+
+
+def _find_or_create_users_sheet(drive_service, sheets_service, folder_id: str, name: str) -> str:
+    # Try find by name in folder
+    try:
+        q = f"mimeType='application/vnd.google-apps.spreadsheet' and name='{name}'"
+        if folder_id:
+            q += f" and '{folder_id}' in parents"
+        resp = drive_service.files().list(q=q, spaces="drive", fields="files(id, name)", pageSize=1).execute()
+        files = resp.get("files", [])
+        if files:
+            return files[0]["id"]
+    except HttpError:
+        pass
+
+    # Create new spreadsheet
+    created = sheets_service.spreadsheets().create(body={"properties": {"title": name}}).execute()
+    sid = created["spreadsheetId"]
+    _move_file_to_folder(drive_service, sid, folder_id)
+    return sid
+
 def create_tournament_table(tournament_id, tournament_data):
-    """Создать Google Таблицу с результатами турнира"""
-    
-    games = tournament_data.get('games', [])
+    """Создать Google Таблицу с результатами турнира.
+
+    Возвращает URL созданной таблицы.
+    """
+
+    games = tournament_data.get("games", [])
     players_stats = calculate_tournament_stats(games)
-    
-    # Создаем простую таблицу в Google Sheets
-    # Пока что возвращаем публичную ссылку
-    
-    if not games:
-        # Если нет игр, создаем пустую таблицу
-        table_url = f"https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit?usp=sharing"
-        return table_url
-    
-    # Создаем CSV данные для таблицы
-    csv_data = create_tournament_csv(tournament_id, games, players_stats)
-    
-    # Возвращаем ссылку на Google Sheets
-    table_url = f"https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit?usp=sharing"
-    
-    return table_url
+
+    # Build services
+    sheets_service, drive_service = _get_services()
+
+    # 1) Create spreadsheet
+    title = f"Badminton Tournament #{tournament_id} — {datetime.now().strftime('%Y-%m-%d')}"
+    spreadsheet_body = {
+        "properties": {"title": title},
+        "sheets": [
+            {
+                "properties": {
+                    "title": "Results",
+                    "gridProperties": {"frozenRowCount": 1},
+                }
+            },
+            {
+                "properties": {
+                    "title": "Games",
+                    "gridProperties": {"frozenRowCount": 1},
+                }
+            },
+        ],
+    }
+
+    created = sheets_service.spreadsheets().create(body=spreadsheet_body).execute()
+    spreadsheet_id = created["spreadsheetId"]
+
+    # Move to folder if provided
+    folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+    if folder_id:
+        _move_file_to_folder(drive_service, spreadsheet_id, folder_id)
+
+    # 2) Prepare data
+    header = [
+        "ID Имя",
+        "№",
+        "Ранг",
+        "Рейтинг",
+        "Игры Δ",
+        "Игры",
+        "Побед",
+        "Пораж",
+        "Очки Δ",
+        "Очки+",
+        "Очки-",
+    ]
+
+    values = [header]
+    for i, p in enumerate(players_stats, 1):
+        points_diff = p["points_for"] - p["points_against"]
+        losses = p["games_played"] - p["games_won"]
+        values.append(
+            [
+                f"{p['id']} Игрок {p['id']}",
+                i,
+                "-",
+                f"{p['old_rating']}→{p['new_rating']}({p['rating_change']:+d})",
+                p["games_played"],
+                p["games_played"],
+                p["games_won"],
+                losses,
+                points_diff,
+                p["points_for"],
+                p["points_against"],
+            ]
+        )
+
+    # 3) Write Results values
+    sheets_service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range="Results!A1",
+        valueInputOption="USER_ENTERED",
+        body={"values": values},
+    ).execute()
+
+    # 3b) Write Games sheet if games provided in tournament_data
+    games = tournament_data.get("games", [])
+    game_values = [["Дата", "Время", "Команда 1", "Команда 2", "Счет 1", "Счет 2"]]
+    for g in games:
+        dt = g.get("played_at", datetime.now().isoformat())
+        date_str = dt[:10]
+        time_str = dt[11:19] if len(dt) > 10 else ""
+        t1 = ", ".join([str(pid) for pid in g.get("team1", [])])
+        t2 = ", ".join([str(pid) for pid in g.get("team2", [])])
+        game_values.append([date_str, time_str, t1, t2, g.get("score1", 0), g.get("score2", 0)])
+
+    sheets_service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range="Games!A1",
+        valueInputOption="USER_ENTERED",
+        body={"values": game_values},
+    ).execute()
+
+    # 4) Optional sharing
+    share_emails_env = os.getenv("GOOGLE_SHARE_EMAILS", "")
+    share_emails = [e for e in share_emails_env.split(",") if e.strip()]
+    # Always include the requester email if provided
+    default_owner = os.getenv("DEFAULT_OWNER_EMAIL", "vanporigon@gmail.com")
+    if default_owner and default_owner not in share_emails:
+        share_emails.append(default_owner)
+    try:
+        _share_spreadsheet(drive_service, spreadsheet_id, share_emails)
+    except Exception:
+        pass
+
+    return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"
+
+
+def update_users_sheet(users: List[dict]):
+    """Создать/обновить таблицу пользователей и записать агрегаты.
+
+    users: list of dicts with keys: telegram_id, name, username, games_played, rating
+    """
+    sheets_service, drive_service = _get_services()
+    folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+    name = os.getenv("GOOGLE_USERS_SHEET_NAME", "Badminton Users")
+    sid = _find_or_create_users_sheet(drive_service, sheets_service, folder_id, name)
+
+    header = ["Telegram ID", "Имя", "Username", "Сыграно игр", "Рейтинг"]
+    values = [header]
+    for u in users:
+        values.append([
+            u.get("telegram_id"),
+            u.get("name"),
+            u.get("username"),
+            u.get("games_played", 0),
+            u.get("rating", 1500),
+        ])
+
+    sheets_service.spreadsheets().values().update(
+        spreadsheetId=sid,
+        range="Users!A1",
+        valueInputOption="USER_ENTERED",
+        body={"values": values},
+    ).execute()
+
+    return f"https://docs.google.com/spreadsheets/d/{sid}/edit"
+
+
+def update_tournament_sheets(spreadsheet_id: str, games: List[dict], players_stats: List[dict]):
+    """Перезаписать листы Results и Games в существующей таблице турнира."""
+    sheets_service, _ = _get_services()
+
+    # Prepare Results
+    header = [
+        "ID Имя",
+        "№",
+        "Ранг",
+        "Рейтинг",
+        "Игры Δ",
+        "Игры",
+        "Побед",
+        "Пораж",
+        "Очки Δ",
+        "Очки+",
+        "Очки-",
+    ]
+    values = [header]
+    players_sorted = sorted(players_stats, key=lambda x: x.get("new_rating", 1500), reverse=True)
+    for i, p in enumerate(players_sorted, 1):
+        points_diff = p.get("points_for", 0) - p.get("points_against", 0)
+        losses = p.get("games_played", 0) - p.get("games_won", 0)
+        values.append([
+            f"{p['id']} Игрок {p['id']}",
+            i,
+            "-",
+            f"{p.get('old_rating', 1500)}→{p.get('new_rating', 1500)}({int(p.get('rating_change',0)):+d})",
+            p.get("games_played", 0),
+            p.get("games_played", 0),
+            p.get("games_won", 0),
+            losses,
+            points_diff,
+            p.get("points_for", 0),
+            p.get("points_against", 0),
+        ])
+
+    sheets_service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range="Results!A1",
+        valueInputOption="USER_ENTERED",
+        body={"values": values},
+    ).execute()
+
+    game_values = [["Дата", "Время", "Команда 1", "Команда 2", "Счет 1", "Счет 2"]]
+    for g in games:
+        dt = g.get("played_at", datetime.now().isoformat())
+        date_str = dt[:10]
+        time_str = dt[11:19] if len(dt) > 10 else ""
+        t1 = ", ".join([str(pid) for pid in g.get("team1", [])])
+        t2 = ", ".join([str(pid) for pid in g.get("team2", [])])
+        game_values.append([date_str, time_str, t1, t2, g.get("score1", 0), g.get("score2", 0)])
+
+    sheets_service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range="Games!A1",
+        valueInputOption="USER_ENTERED",
+        body={"values": game_values},
+    ).execute()
+
+    return f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"
 
 def create_tournament_csv(tournament_id, games, players_stats):
     """Создать CSV данные для турнира"""

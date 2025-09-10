@@ -1,12 +1,12 @@
 import os
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict
 import logging
 
 # Настройка логирования
@@ -57,11 +57,16 @@ class Player(Base):
     last_name = Column(String, nullable=True)
     username = Column(String, nullable=True)
     rating = Column(Integer, default=1500)
+    rd = Column(Float, default=350.0)
+    volatility = Column(Float, default=0.06)
+    initial_rank = Column(String, nullable=True)  # 'G'..'A'
+    games_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Связи
     rooms = relationship("Room", back_populates="creator")
     memberships = relationship("RoomMember", back_populates="player")
+    games_played = relationship("GamePlayer", back_populates="player")
 
 class Room(Base):
     __tablename__ = "rooms"
@@ -90,6 +95,51 @@ class RoomMember(Base):
     room = relationship("Room", back_populates="members")
     player = relationship("Player", back_populates="memberships")
 
+
+class Tournament(Base):
+    __tablename__ = "tournaments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    ended_at = Column(DateTime, nullable=True)
+
+    games = relationship("Game", back_populates="tournament")
+
+
+class Game(Base):
+    __tablename__ = "games"
+
+    id = Column(Integer, primary_key=True, index=True)
+    room_id = Column(Integer, nullable=True)
+    tournament_id = Column(Integer, ForeignKey("tournaments.id"), nullable=True)
+    score1 = Column(Integer, default=0)
+    score2 = Column(Integer, default=0)
+    played_at = Column(DateTime, default=datetime.utcnow)
+
+    tournament = relationship("Tournament", back_populates="games")
+    players = relationship("GamePlayer", back_populates="game")
+
+
+class GamePlayer(Base):
+    __tablename__ = "game_players"
+
+    id = Column(Integer, primary_key=True, index=True)
+    game_id = Column(Integer, ForeignKey("games.id"))
+    player_id = Column(Integer, ForeignKey("players.id"))
+    team = Column(Integer)  # 1 or 2
+    old_rating = Column(Integer)
+    new_rating = Column(Integer)
+    rating_change = Column(Integer)
+    old_rd = Column(Float)
+    new_rd = Column(Float)
+    old_volatility = Column(Float)
+    new_volatility = Column(Float)
+
+    game = relationship("Game", back_populates="players")
+    player = relationship("Player", back_populates="games_played")
+
 # Создание таблиц
 try:
     Base.metadata.create_all(bind=engine)
@@ -111,6 +161,7 @@ class PlayerCreate(BaseModel):
     first_name: str
     last_name: Optional[str] = None
     username: Optional[str] = None
+    initial_rank: Optional[str] = None
 
 class PlayerResponse(BaseModel):
     id: int
@@ -119,6 +170,10 @@ class PlayerResponse(BaseModel):
     last_name: Optional[str]
     username: Optional[str]
     rating: int
+    rd: float
+    volatility: float
+    initial_rank: Optional[str]
+    games_count: int
     
     class Config:
         from_attributes = True
@@ -136,6 +191,51 @@ class RoomMemberResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class GameCreate(BaseModel):
+    team1_telegram_ids: List[int]
+    team2_telegram_ids: List[int]
+    score1: int
+    score2: int
+    room_id: Optional[int] = None
+    tournament_id: Optional[int] = None
+
+
+class TournamentCreate(BaseModel):
+    name: Optional[str] = None
+
+
+class TournamentResponse(BaseModel):
+    id: int
+    name: Optional[str]
+    is_active: bool
+    created_at: datetime
+    ended_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+RANK_TO_RATING: Dict[str, int] = {
+    "G": 600,
+    "F": 700,
+    "E": 800,
+    "D": 900,
+    "C": 1000,
+    "B": 1100,
+    "A": 1200,
+}
+
+def _ensure_player(db: Session, telegram_id: int, first_name: str = "Игрок", last_name: Optional[str] = None, username: Optional[str] = None) -> Player:
+    player = db.query(Player).filter(Player.telegram_id == telegram_id).first()
+    if player:
+        return player
+    player = Player(telegram_id=telegram_id, first_name=first_name or "Игрок", last_name=last_name, username=username)
+    db.add(player)
+    db.commit()
+    db.refresh(player)
+    return player
 
 class RoomResponse(BaseModel):
     id: int
@@ -178,12 +278,22 @@ async def create_or_get_player(player: PlayerCreate, db: Session = Depends(get_d
                 existing_player.last_name = player.last_name
             if player.username:
                 existing_player.username = player.username
+            if player.initial_rank and not existing_player.initial_rank:
+                existing_player.initial_rank = player.initial_rank
+                if player.initial_rank in RANK_TO_RATING and existing_player.rating == 1500:
+                    existing_player.rating = RANK_TO_RATING[player.initial_rank]
             db.commit()
             db.refresh(existing_player)
             return existing_player
         
         # Создаем нового игрока
-        new_player = Player(**player.dict())
+        initial_data = player.dict()
+        init_rank = initial_data.pop("initial_rank", None)
+        new_player = Player(**initial_data)
+        if init_rank:
+            new_player.initial_rank = init_rank
+            if init_rank in RANK_TO_RATING:
+                new_player.rating = RANK_TO_RATING[init_rank]
         db.add(new_player)
         db.commit()
         db.refresh(new_player)
@@ -193,6 +303,26 @@ async def create_or_get_player(player: PlayerCreate, db: Session = Depends(get_d
         
     except Exception as e:
         logger.error(f"❌ Ошибка создания игрока: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/players/set_rank", response_model=PlayerResponse)
+async def set_player_rank(data: PlayerCreate, db: Session = Depends(get_db)):
+    """Установить начальный ранг игрока (G..A) и применить стартовый рейтинг, если не был установлен ранее."""
+    try:
+        player = db.query(Player).filter(Player.telegram_id == data.telegram_id).first()
+        if not player:
+            player = _ensure_player(db, data.telegram_id, data.first_name, data.last_name, data.username)
+        if data.initial_rank:
+            player.initial_rank = data.initial_rank
+            if player.games_count == 0 and player.rating in (None, 0, 1500):
+                mapped = RANK_TO_RATING.get(data.initial_rank)
+                if mapped:
+                    player.rating = mapped
+        db.commit()
+        db.refresh(player)
+        return player
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/players/{telegram_id}", response_model=PlayerResponse)
@@ -257,6 +387,237 @@ async def create_room(room: RoomCreate, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"❌ Ошибка создания комнаты: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+def _calculate_and_apply_ratings(db: Session, team1: List[Player], team2: List[Player], score1: int, score2: int):
+    from glicko2 import glicko2, calculate_team_rating, distribute_rating_changes
+
+    # Build team stats
+    team1_stats = [(p.rating, p.rd, p.volatility) for p in team1]
+    team2_stats = [(p.rating, p.rd, p.volatility) for p in team2]
+
+    t1_rating, t1_rd, t1_vol = calculate_team_rating(team1_stats)
+    t2_rating, t2_rd, t2_vol = calculate_team_rating(team2_stats)
+
+    # Scores
+    if score1 > score2:
+        s1, s2 = 1.0, 0.0
+    elif score2 > score1:
+        s1, s2 = 0.0, 1.0
+    else:
+        s1, s2 = 0.5, 0.5
+
+    # Update team ratings vs each other
+    new_t1_rating, new_t1_rd, new_t1_vol = glicko2.calculate_new_rating(
+        t1_rating, t1_rd, t1_vol, [t2_rating], [t2_rd], [s1]
+    )
+    new_t2_rating, new_t2_rd, new_t2_vol = glicko2.calculate_new_rating(
+        t2_rating, t2_rd, t2_vol, [t1_rating], [t1_rd], [s2]
+    )
+
+    # Distribute changes back to players
+    team1_new = distribute_rating_changes(
+        team1_stats, new_t1_rating - t1_rating, new_t1_rd - t1_rd, new_t1_vol - t1_vol
+    )
+    team2_new = distribute_rating_changes(
+        team2_stats, new_t2_rating - t2_rating, new_t2_rd - t2_rd, new_t2_vol - t2_vol
+    )
+
+    # Apply and collect changes
+    changes: Dict[int, Dict] = {}
+    for player, (nr, nrd, nvol) in zip(team1, team1_new):
+        old = player.rating
+        player.rating = int(round(nr))
+        changes[player.telegram_id] = {
+            "old_rating": old,
+            "new_rating": player.rating,
+            "rating_change": player.rating - old,
+            "team": 1,
+            "won": score1 > score2,
+        }
+        player.rd = float(nrd)
+        player.volatility = float(nvol)
+        player.games_count = (player.games_count or 0) + 1
+
+    for player, (nr, nrd, nvol) in zip(team2, team2_new):
+        old = player.rating
+        player.rating = int(round(nr))
+        changes[player.telegram_id] = {
+            "old_rating": old,
+            "new_rating": player.rating,
+            "rating_change": player.rating - old,
+            "team": 2,
+            "won": score2 > score1,
+        }
+        player.rd = float(nrd)
+        player.volatility = float(nvol)
+        player.games_count = (player.games_count or 0) + 1
+
+    return changes
+
+
+@app.post("/games")
+async def create_game(game: GameCreate, db: Session = Depends(get_db)):
+    """Создать игру, обновить рейтинги Glicko-2, вернуть изменения для UI."""
+    try:
+        # Ensure players
+        team1 = [
+            _ensure_player(db, pid) for pid in game.team1_telegram_ids
+        ]
+        team2 = [
+            _ensure_player(db, pid) for pid in game.team2_telegram_ids
+        ]
+
+        # Calculate ratings
+        changes = _calculate_and_apply_ratings(db, team1, team2, game.score1, game.score2)
+
+        # Persist Game and per-player entries
+        new_game = Game(
+            room_id=game.room_id,
+            tournament_id=game.tournament_id,
+            score1=game.score1,
+            score2=game.score2,
+        )
+        db.add(new_game)
+        db.commit()
+        db.refresh(new_game)
+
+        for p in team1:
+            ch = changes[p.telegram_id]
+            gp = GamePlayer(
+                game_id=new_game.id,
+                player_id=p.id,
+                team=1,
+                old_rating=ch["old_rating"],
+                new_rating=ch["new_rating"],
+                rating_change=ch["rating_change"],
+                old_rd=0.0,
+                new_rd=p.rd,
+                old_volatility=0.0,
+                new_volatility=p.volatility,
+            )
+            db.add(gp)
+
+        for p in team2:
+            ch = changes[p.telegram_id]
+            gp = GamePlayer(
+                game_id=new_game.id,
+                player_id=p.id,
+                team=2,
+                old_rating=ch["old_rating"],
+                new_rating=ch["new_rating"],
+                rating_change=ch["rating_change"],
+                old_rd=0.0,
+                new_rd=p.rd,
+                old_volatility=0.0,
+                new_volatility=p.volatility,
+            )
+            db.add(gp)
+
+        db.commit()
+
+        # Update Google Users sheet
+        try:
+            from google_sheets import update_users_sheet
+
+            # Export minimal users data
+            users = [
+                {
+                    "telegram_id": p.telegram_id,
+                    "name": f"{p.first_name} {p.last_name or ''}".strip(),
+                    "username": p.username,
+                    "games_played": p.games_count or 0,
+                    "rating": p.rating,
+                }
+                for p in db.query(Player).all()
+            ]
+            update_users_sheet(users)
+        except Exception:
+            pass
+
+        return {"game_id": new_game.id, "rating_changes": changes}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/tournaments/start", response_model=TournamentResponse)
+async def start_tournament(data: TournamentCreate, db: Session = Depends(get_db)):
+    t = Tournament(name=data.name or f"Tournament {datetime.utcnow().strftime('%Y-%m-%d')}")
+    db.add(t)
+    db.commit()
+    db.refresh(t)
+    return t
+
+
+@app.post("/tournaments/{tournament_id}/end")
+async def end_tournament(tournament_id: int, db: Session = Depends(get_db)):
+    t = db.query(Tournament).filter(Tournament.id == tournament_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Турнир не найден")
+    t.is_active = False
+    t.ended_at = datetime.utcnow()
+    db.commit()
+
+    # Build games structure for sheets
+    games = db.query(Game).filter(Game.tournament_id == t.id).all()
+    players_stats: Dict[int, Dict] = {}
+    # Aggregate stats from GamePlayer
+    for g in games:
+        gp_list = db.query(GamePlayer).filter(GamePlayer.game_id == g.id).all()
+        # Determine teams by team field
+        team1_ids = [gp.player.player_id if hasattr(gp, 'player') else gp.player_id for gp in gp_list if gp.team == 1]
+        team2_ids = [gp.player.player_id if hasattr(gp, 'player') else gp.player_id for gp in gp_list if gp.team == 2]
+        # Scores
+        for gp in gp_list:
+            pid = gp.player_id
+            if pid not in players_stats:
+                p = db.query(Player).filter(Player.id == pid).first()
+                players_stats[pid] = {
+                    "id": p.telegram_id,
+                    "games_played": 0,
+                    "games_won": 0,
+                    "points_for": 0,
+                    "points_against": 0,
+                    "rating_change": 0,
+                    "old_rating": gp.old_rating,
+                    "new_rating": gp.new_rating,
+                }
+            ps = players_stats[pid]
+            ps["games_played"] += 1
+            won = (g.score1 > g.score2 and gp.team == 1) or (g.score2 > g.score1 and gp.team == 2)
+            if won:
+                ps["games_won"] += 1
+            if gp.team == 1:
+                ps["points_for"] += g.score1
+                ps["points_against"] += g.score2
+            else:
+                ps["points_for"] += g.score2
+                ps["points_against"] += g.score1
+            ps["rating_change"] += gp.rating_change
+            ps["new_rating"] = gp.new_rating
+
+    # Compose tournament_data format for sheets lib
+    tournament_data = {
+        "games": [
+            {
+                "team1": [gp.player.telegram_id for gp in db.query(GamePlayer).filter(GamePlayer.game_id == g.id, GamePlayer.team == 1).all()],
+                "team2": [gp.player.telegram_id for gp in db.query(GamePlayer).filter(GamePlayer.game_id == g.id, GamePlayer.team == 2).all()],
+                "score1": g.score1,
+                "score2": g.score2,
+                "played_at": g.played_at.isoformat(),
+            }
+            for g in games
+        ]
+    }
+
+    try:
+        from google_sheets import create_tournament_table
+        url = create_tournament_table(t.id, tournament_data)
+    except Exception as e:
+        url = None
+
+    return {"tournament_id": t.id, "sheet_url": url}
 
 @app.get("/rooms/", response_model=List[RoomResponse])
 async def get_rooms(db: Session = Depends(get_db)):
@@ -337,6 +698,42 @@ async def get_room(room_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"❌ Ошибка получения комнаты {room_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rooms/{room_id}/join", response_model=RoomResponse)
+async def join_room(room_id: int, telegram_id: int, db: Session = Depends(get_db)):
+    room = db.query(Room).filter(Room.id == room_id, Room.is_active == True).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+    player = db.query(Player).filter(Player.telegram_id == telegram_id).first()
+    if not player:
+        player = _ensure_player(db, telegram_id)
+    # Check membership
+    exists = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.player_id == player.id).first()
+    if exists:
+        pass
+    else:
+        # Limit by max_players
+        count = db.query(RoomMember).filter(RoomMember.room_id == room_id).count()
+        if count >= room.max_players:
+            raise HTTPException(status_code=400, detail="Комната заполнена")
+        db.add(RoomMember(room_id=room_id, player_id=player.id, is_leader=False))
+        db.commit()
+
+    return await get_room(room_id, db)
+
+
+@app.post("/rooms/{room_id}/leave", response_model=RoomResponse)
+async def leave_room(room_id: int, telegram_id: int, db: Session = Depends(get_db)):
+    room = db.query(Room).filter(Room.id == room_id).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена")
+    player = db.query(Player).filter(Player.telegram_id == telegram_id).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Игрок не найден")
+    db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.player_id == player.id).delete()
+    db.commit()
+    return await get_room(room_id, db)
 
 @app.delete("/rooms/{room_id}")
 async def delete_room(room_id: int, db: Session = Depends(get_db)):

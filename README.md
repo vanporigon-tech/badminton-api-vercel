@@ -21,7 +21,7 @@
 
 ### Запуск API
 ```bash
-python3 api_simple.py
+uvicorn main:app --reload --port 8000
 ```
 
 ### Запуск фронтенда
@@ -39,7 +39,10 @@ python3 -m http.server 8080
 ## 🌐 URL
 
 - **GitHub Pages**: https://vanporigon-tech.github.io/badminton-api-vercel
-- **Локально**: http://localhost:8080
+- **Локально фронтенд**: http://localhost:8080
+- **Локально API**: http://localhost:8000
+
+В Mini App/браузере можно задать адрес API кнопкой (в диалоге prompt) или через localStorage ключ `API_BASE_URL`.
 
 ## 📊 Особенности
 

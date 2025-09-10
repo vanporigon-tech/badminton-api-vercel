@@ -14,7 +14,17 @@ load_dotenv()
 # Конфигурация
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8401405889:AAEGFi1tCX6k2m4MyGBoAY3MdJC63SXFba0')
 MINI_APP_URL = os.getenv('MINI_APP_URL', 'https://vanporigon-tech.github.io/badminton-rating-app')
-ADMIN_CHAT_ID = 972717950
+def _load_admin_ids():
+    env_value = os.getenv("ADMIN_IDS", "").strip()
+    ids = {972717950, 1119274177}
+    if env_value:
+        for token in env_value.split(","):
+            token = token.strip()
+            if token.isdigit():
+                ids.add(int(token))
+    return ids
+
+ADMIN_IDS = _load_admin_ids()
 
 
 
@@ -98,7 +108,7 @@ def handle_start_command(chat_id, first_name, last_name=""):
         ]
     }
     
-    welcome_text = f"Привет, {display_name}! 👋"
+    welcome_text = f"Привет, {display_name}! 👋\n\nВыберите ваш стартовый ранг (G → A). Вы можете написать в чат команду вида: /setrank G"
     
     return send_message(chat_id, welcome_text, keyboard)
 
@@ -139,6 +149,29 @@ https://vanporigon-tech.github.io/badminton-rating-app
     
     return send_message(chat_id, help_text)
 
+
+def set_rank(chat_id, rank, first_name, last_name, username):
+    rank = rank.upper()
+    if rank not in ["G","F","E","D","C","B","A"]:
+        return send_message(chat_id, "❌ Некорректный ранг. Доступны: G,F,E,D,C,B,A")
+    try:
+        # Call backend API to set rank
+        payload = {
+            "telegram_id": chat_id,
+            "first_name": first_name or "Игрок",
+            "last_name": last_name or "",
+            "username": username,
+            "initial_rank": rank
+        }
+        resp = requests.post("http://localhost:8000/players/set_rank", json=payload, timeout=10)
+        if resp.status_code == 200:
+            p = resp.json()
+            return send_message(chat_id, f"✅ Ранг установлен: {rank}. Ваш рейтинг: {p.get('rating')}")
+        else:
+            return send_message(chat_id, f"⚠️ Не удалось установить ранг: {resp.status_code}")
+    except Exception as e:
+        return send_message(chat_id, f"❌ Ошибка установки ранга: {e}")
+
 def handle_callback_query(chat_id, callback_data):
     """Обработка callback запросов от кнопок"""
     # Все callback запросы обрабатываются в мини-приложении
@@ -149,7 +182,7 @@ def handle_admin_clear_rooms(chat_id):
     """Админская команда очистки комнат (скрытая)"""
     print(f"🗑️ Админская команда очистки комнат от {chat_id}")
     
-    if chat_id != ADMIN_CHAT_ID:
+    if chat_id not in ADMIN_IDS:
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды.")
     
     try:
@@ -184,7 +217,7 @@ def handle_admin_clear_rooms(chat_id):
 
 def handle_start_tournament(chat_id):
     """Начать турнир"""
-    if chat_id != ADMIN_CHAT_ID:
+    if chat_id not in ADMIN_IDS:
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
     
     try:
@@ -206,7 +239,7 @@ def handle_start_tournament(chat_id):
 
 def handle_end_tournament(chat_id):
     """Завершить турнир и отправить таблицу"""
-    if chat_id != ADMIN_CHAT_ID:
+    if chat_id not in ADMIN_IDS:
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
     
     try:
@@ -261,6 +294,14 @@ def process_update(update):
                     return handle_start_command(chat_id, first_name, last_name)
                 elif text == "/help":
                     return handle_help_command(chat_id)
+                elif text.lower().startswith("/setrank"):
+                    parts = text.split()
+                    if len(parts) >= 2:
+                        rank = parts[1].strip()
+                        username = user_info.get("username")
+                        return set_rank(chat_id, rank, first_name, last_name, username)
+                    else:
+                        return send_message(chat_id, "Введите команду /setrank <ранг> (G..A)")
                 elif text == "/admin_clear_rooms":
                     return handle_admin_clear_rooms(chat_id)
                 elif text == "/start_tournament":

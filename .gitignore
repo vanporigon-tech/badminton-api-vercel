@@ -1,3 +1,13 @@
+# Secrets
+credentials/*.json
+.env
+badminton_rating.db
+badminton.db
+*.sqlite
+__pycache__/
+*.pyc
+venv/
+
 # Python
 __pycache__/
 *.py[cod]
