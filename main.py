@@ -565,16 +565,13 @@ async def end_tournament(tournament_id: int, db: Session = Depends(get_db)):
     # Aggregate stats from GamePlayer
     for g in games:
         gp_list = db.query(GamePlayer).filter(GamePlayer.game_id == g.id).all()
-        # Determine teams by team field
-        team1_ids = [gp.player.player_id if hasattr(gp, 'player') else gp.player_id for gp in gp_list if gp.team == 1]
-        team2_ids = [gp.player.player_id if hasattr(gp, 'player') else gp.player_id for gp in gp_list if gp.team == 2]
-        # Scores
         for gp in gp_list:
             pid = gp.player_id
-            if pid not in players_stats:
-                p = db.query(Player).filter(Player.id == pid).first()
-                players_stats[pid] = {
-                    "id": p.telegram_id,
+            p = db.query(Player).filter(Player.id == pid).first()
+            tid = p.telegram_id
+            if tid not in players_stats:
+                players_stats[tid] = {
+                    "id": tid,
                     "games_played": 0,
                     "games_won": 0,
                     "points_for": 0,
@@ -583,7 +580,7 @@ async def end_tournament(tournament_id: int, db: Session = Depends(get_db)):
                     "old_rating": gp.old_rating,
                     "new_rating": gp.new_rating,
                 }
-            ps = players_stats[pid]
+            ps = players_stats[tid]
             ps["games_played"] += 1
             won = (g.score1 > g.score2 and gp.team == 1) or (g.score2 > g.score1 and gp.team == 2)
             if won:
@@ -601,8 +598,14 @@ async def end_tournament(tournament_id: int, db: Session = Depends(get_db)):
     tournament_data = {
         "games": [
             {
-                "team1": [gp.player.telegram_id for gp in db.query(GamePlayer).filter(GamePlayer.game_id == g.id, GamePlayer.team == 1).all()],
-                "team2": [gp.player.telegram_id for gp in db.query(GamePlayer).filter(GamePlayer.game_id == g.id, GamePlayer.team == 2).all()],
+                "team1": [
+                    db.query(Player).filter(Player.id == gp.player_id).first().telegram_id
+                    for gp in db.query(GamePlayer).filter(GamePlayer.game_id == g.id, GamePlayer.team == 1).all()
+                ],
+                "team2": [
+                    db.query(Player).filter(Player.id == gp.player_id).first().telegram_id
+                    for gp in db.query(GamePlayer).filter(GamePlayer.game_id == g.id, GamePlayer.team == 2).all()
+                ],
                 "score1": g.score1,
                 "score2": g.score2,
                 "played_at": g.played_at.isoformat(),

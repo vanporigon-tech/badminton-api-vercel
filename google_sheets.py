@@ -93,6 +93,21 @@ def _find_or_create_users_sheet(drive_service, sheets_service, folder_id: str, n
     _move_file_to_folder(drive_service, sid, folder_id)
     return sid
 
+
+def _ensure_sheet_exists(sheets_service, spreadsheet_id: str, sheet_title: str):
+    meta = sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+    sheets = meta.get("sheets", [])
+    titles = {s.get("properties", {}).get("title") for s in sheets}
+    if sheet_title not in titles:
+        sheets_service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={
+                "requests": [
+                    {"addSheet": {"properties": {"title": sheet_title, "gridProperties": {"frozenRowCount": 1}}}}
+                ]
+            },
+        ).execute()
+
 def create_tournament_table(tournament_id, tournament_data):
     """Создать Google Таблицу с результатами турнира.
 
@@ -218,6 +233,9 @@ def update_users_sheet(users: List[dict]):
     folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID", "").strip()
     name = os.getenv("GOOGLE_USERS_SHEET_NAME", "Badminton Users")
     sid = _find_or_create_users_sheet(drive_service, sheets_service, folder_id, name)
+
+    # Ensure Users sheet exists
+    _ensure_sheet_exists(sheets_service, sid, "Users")
 
     header = ["Telegram ID", "Имя", "Username", "Сыграно игр", "Рейтинг"]
     values = [header]
