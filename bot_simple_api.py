@@ -14,6 +14,7 @@ load_dotenv()
 # Конфигурация
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8401405889:AAEGFi1tCX6k2m4MyGBoAY3MdJC63SXFba0')
 MINI_APP_URL = os.getenv('MINI_APP_URL', 'https://vanporigon-tech.github.io/badminton-rating-app')
+API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000')
 def _load_admin_ids():
     env_value = os.getenv("ADMIN_IDS", "").strip()
     ids = {972717950, 1119274177}
@@ -221,15 +222,13 @@ def handle_start_tournament(chat_id):
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
     
     try:
-        # Отправляем запрос в API для начала турнира
-        response = requests.get("https://vanporigon-tech.github.io/badminton-rating-app/api/tournament/start.json")
-        
-        if response.status_code == 200:
-            data = response.json()
-            tournament_id = data.get('tournament_id')
+        resp = requests.post(f"{API_BASE_URL}/tournaments/start", json={})
+        if resp.status_code == 200:
+            data = resp.json()
+            tournament_id = data.get('id')
             response_text = f"🏆 Турнир #{tournament_id} начат!\n\nВсе игры будут записываться в турнир до команды /end_tournament"
         else:
-            response_text = f"❌ Ошибка начала турнира: {response.status_code}"
+            response_text = f"❌ Ошибка начала турнира: {resp.status_code}"
             
         return send_message(chat_id, response_text)
         
@@ -243,27 +242,11 @@ def handle_end_tournament(chat_id):
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
     
     try:
-        # Завершаем турнир в API
-        response = requests.get("https://vanporigon-tech.github.io/badminton-rating-app/api/tournament/end.json")
-        
-        if response.status_code == 200:
-            data = response.json()
-            tournament_id = data.get('tournament_id')
-            
-            # Получаем данные турнира
-            data_response = requests.get(f"https://vanporigon-tech.github.io/badminton-rating-app/api/tournament/{tournament_id}.json")
-            
-            if data_response.status_code == 200:
-                tournament_data = data_response.json()
-                
-                # Создаем Google Таблицу
-                table_url = create_tournament_table(tournament_id, tournament_data)
-                
-                response_text = f"🏆 Турнир #{tournament_id} завершен!\n\n📊 Результаты: {table_url}"
-            else:
-                response_text = f"🏆 Турнир #{tournament_id} завершен!\n\n❌ Ошибка получения данных: {data_response.status_code}"
-        else:
-            response_text = f"❌ Ошибка завершения турнира: {response.status_code}"
+        # Для простоты: завершаем последний активный турнир (id из env нельзя хранить стабильно)
+        # В реальном сценарии чат должен хранить текущий id, но здесь дернем end для значения из localStorage фронта
+        # Предполагаем, что фронт прислал id отдельно — оставляем простой вызов
+        # Если id неизвестен, вернем сообщение
+        response_text = "Введите /end_tournament <id>"
             
         return send_message(chat_id, response_text)
         
@@ -306,8 +289,21 @@ def process_update(update):
                     return handle_admin_clear_rooms(chat_id)
                 elif text == "/start_tournament":
                     return handle_start_tournament(chat_id)
-                elif text == "/end_tournament":
-                    return handle_end_tournament(chat_id)
+                elif text.startswith("/end_tournament"):
+                    parts = text.split()
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        tid = int(parts[1])
+                        try:
+                            resp = requests.post(f"{API_BASE_URL}/tournaments/{tid}/end", json={})
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                return send_message(chat_id, f"🏁 Турнир #{tid} завершен! {data.get('sheet_url','')}")
+                            else:
+                                return send_message(chat_id, f"❌ Ошибка завершения: {resp.status_code}")
+                        except Exception as e:
+                            return send_message(chat_id, f"❌ Ошибка: {e}")
+                    else:
+                        return handle_end_tournament(chat_id)
                 else:
                     # Игнорируем все остальные команды
                     return True
