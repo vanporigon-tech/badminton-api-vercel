@@ -5,16 +5,15 @@ import requests
 import json
 import time
 import os
-import sqlite3
 from dotenv import load_dotenv
 
 # Загружаем переменные окружения
 load_dotenv()
 
 # Конфигурация
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8401405889:AAEGFi1tCX6k2m4MyGBoAY3MdJC63SXFba0')
+BOT_TOKEN = os.getenv('BOT_TOKEN', '')
 MINI_APP_URL = os.getenv('MINI_APP_URL', 'https://vanporigon-tech.github.io/badminton-rating-app')
-API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000')
+API_BASE_URL = os.getenv('API_BASE_URL', 'https://badminton-api-vercel.onrender.com')
 def _load_admin_ids():
     env_value = os.getenv("ADMIN_IDS", "").strip()
     ids = {972717950, 1119274177}
@@ -87,13 +86,27 @@ def setup_bot_commands():
         print(f"❌ Ошибка настройки команд: {str(e)}")
         return False
 
-def handle_start_command(chat_id, first_name, last_name=""):
+def handle_start_command(chat_id, first_name, last_name="", username=""):
     """Обработка команды /start"""
     print(f"🚀 Обрабатываю команду /start для {first_name}")
-    
-    # Создаем или обновляем игрока в базе данных
-    player_info = get_or_create_player(chat_id, first_name, last_name)
-    display_name = player_info['full_name'] if player_info else first_name
+
+    # Регистрируем/обновляем игрока через API (идемпотентно)
+    display_name = first_name
+    try:
+        payload = {
+            "telegram_id": chat_id,
+            "first_name": first_name or "Игрок",
+            "last_name": last_name or "",
+            "username": username or ""
+        }
+        resp = requests.post(f"{API_BASE_URL}/players/", json=payload, timeout=15)
+        if resp.status_code == 200:
+            p = resp.json()
+            fn = p.get("first_name") or first_name
+            ln = p.get("last_name") or ""
+            display_name = f"{fn} {ln}".strip()
+    except Exception as e:
+        print(f"⚠️ Не удалось зарегистрировать игрока в API: {e}")
     
     # Создаем клавиатуру с кнопкой запуска игры
     keyboard = {
@@ -164,7 +177,7 @@ def set_rank(chat_id, rank, first_name, last_name, username):
             "username": username,
             "initial_rank": rank
         }
-        resp = requests.post("http://localhost:8000/players/set_rank", json=payload, timeout=10)
+        resp = requests.post(f"{API_BASE_URL}/players/set_rank", json=payload, timeout=10)
         if resp.status_code == 200:
             p = resp.json()
             return send_message(chat_id, f"✅ Ранг установлен: {rank}. Ваш рейтинг: {p.get('rating')}")
@@ -180,41 +193,29 @@ def handle_callback_query(chat_id, callback_data):
 
 
 def handle_admin_clear_rooms(chat_id):
-    """Админская команда очистки комнат (скрытая)"""
+    """Админская команда очистки комнат через API"""
     print(f"🗑️ Админская команда очистки комнат от {chat_id}")
-    
     if chat_id not in ADMIN_IDS:
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды.")
-    
     try:
-        # Удаляем все комнаты из базы данных SQLite
-        import sqlite3
-        
-        db_path = "badminton.db"
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        
-        # Получаем количество комнат перед удалением
-        cursor.execute("SELECT COUNT(*) FROM rooms")
-        rooms_count = cursor.fetchone()[0]
-        
-        # Удаляем все комнаты
-        cursor.execute("DELETE FROM rooms")
-        
-        # Сбрасываем автоинкремент
-        cursor.execute("DELETE FROM sqlite_sequence WHERE name='rooms'")
-        
-        conn.commit()
-        conn.close()
-        
-        success_message = f"✅ Удалено комнат: {rooms_count}\n💣 Все комнаты успешно очищены и расформированы!\n🔄 Счетчик ID сброшен.\n\n⚠️ ВАЖНО: Все пользователи должны обновить страницу Mini App для применения изменений!"
-        print(f"✅ Удалено {rooms_count} комнат из базы данных")
-        
+        # Получаем список комнат и удаляем их через API
+        resp = requests.get(f"{API_BASE_URL}/rooms/", timeout=20)
+        if resp.status_code != 200:
+            return send_message(chat_id, f"❌ Не удалось получить список комнат: {resp.status_code}")
+        rooms = resp.json() or []
+        deleted = 0
+        for r in rooms:
+            rid = r.get('id')
+            if not rid:
+                continue
+            dr = requests.delete(f"{API_BASE_URL}/rooms/{rid}", timeout=20)
+            if dr.status_code == 200:
+                deleted += 1
+        return send_message(chat_id, f"✅ Комнат удалено: {deleted}")
     except Exception as e:
-        print(f"❌ Ошибка очистки комнат: {str(e)}")
-        success_message = f"❌ Ошибка при очистке комнат: {str(e)}"
-    
-    return send_message(chat_id, success_message)
+        return send_message(chat_id, f"❌ Ошибка очистки комнат: {e}")
+
+_current_tournaments = {}
 
 def handle_start_tournament(chat_id):
     """Начать турнир"""
@@ -222,10 +223,11 @@ def handle_start_tournament(chat_id):
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
     
     try:
-        resp = requests.post(f"{API_BASE_URL}/tournaments/start", json={})
+        resp = requests.post(f"{API_BASE_URL}/tournaments/start", json={}, timeout=15)
         if resp.status_code == 200:
             data = resp.json()
             tournament_id = data.get('id')
+            _current_tournaments[chat_id] = tournament_id
             response_text = f"🏆 Турнир #{tournament_id} начат!\n\nВсе игры будут записываться в турнир до команды /end_tournament"
         else:
             response_text = f"❌ Ошибка начала турнира: {resp.status_code}"
@@ -242,13 +244,16 @@ def handle_end_tournament(chat_id):
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
     
     try:
-        # Для простоты: завершаем последний активный турнир (id из env нельзя хранить стабильно)
-        # В реальном сценарии чат должен хранить текущий id, но здесь дернем end для значения из localStorage фронта
-        # Предполагаем, что фронт прислал id отдельно — оставляем простой вызов
-        # Если id неизвестен, вернем сообщение
-        response_text = "Введите /end_tournament <id>"
-            
-        return send_message(chat_id, response_text)
+        tid = _current_tournaments.get(chat_id)
+        if not tid:
+            return send_message(chat_id, "❌ Не найден активный турнир в этом чате. Запустите /start_tournament или укажите ID: /end_tournament <id>")
+        resp = requests.post(f"{API_BASE_URL}/tournaments/{tid}/end", json={}, timeout=30)
+        if resp.status_code == 200:
+            data = resp.json()
+            _current_tournaments.pop(chat_id, None)
+            return send_message(chat_id, f"🏁 Турнир #{tid} завершен! Таблица: {data.get('sheet_url','')}")
+        else:
+            return send_message(chat_id, f"❌ Ошибка завершения турнира: {resp.status_code}")
         
     except Exception as e:
         print(f"❌ Ошибка при завершении турнира: {e}")
@@ -274,7 +279,8 @@ def process_update(update):
                 text = message["text"]
                 
                 if text == "/start":
-                    return handle_start_command(chat_id, first_name, last_name)
+                    username = user_info.get("username", "")
+                    return handle_start_command(chat_id, first_name, last_name, username)
                 elif text == "/help":
                     return handle_help_command(chat_id)
                 elif text.lower().startswith("/setrank"):
@@ -292,12 +298,14 @@ def process_update(update):
                 elif text.startswith("/end_tournament"):
                     parts = text.split()
                     if len(parts) >= 2 and parts[1].isdigit():
+                        if chat_id not in ADMIN_IDS:
+                            return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
                         tid = int(parts[1])
                         try:
-                            resp = requests.post(f"{API_BASE_URL}/tournaments/{tid}/end", json={})
+                            resp = requests.post(f"{API_BASE_URL}/tournaments/{tid}/end", json={}, timeout=30)
                             if resp.status_code == 200:
                                 data = resp.json()
-                                return send_message(chat_id, f"🏁 Турнир #{tid} завершен! {data.get('sheet_url','')}")
+                                return send_message(chat_id, f"🏁 Турнир #{tid} завершен! Таблица: {data.get('sheet_url','')}")
                             else:
                                 return send_message(chat_id, f"❌ Ошибка завершения: {resp.status_code}")
                         except Exception as e:
