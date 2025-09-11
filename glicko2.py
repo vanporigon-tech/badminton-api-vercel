@@ -140,10 +140,12 @@ class Glicko2:
             expectations.append(e)
         
         # Compute v (variance)
-        v = 0
+        v = 0.0
         for g_phi, expectation in zip(g_phis, expectations):
             v += g_phi * g_phi * expectation * (1 - expectation)
-        v = 1 / v
+        if v <= 0.0:
+            v = 1e-9
+        v = 1.0 / v
         
         # Compute delta
         delta = 0
