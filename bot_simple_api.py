@@ -55,6 +55,32 @@ def send_message(chat_id, text, reply_markup=None):
         print(f"❌ Ошибка отправки: {str(e)}")
         return False
 
+RANK_TO_RATING = {
+    "G": 600,
+    "F": 700,
+    "E": 800,
+    "D": 900,
+    "C": 1000,
+    "B": 1100,
+    "A": 1200,
+}
+
+def send_rank_prompt(chat_id):
+    msg = (
+        "Напишите свой рейтинг по системе (или выберите кнопку):\n\n"
+        "G = 600\nF = 700\nE = 800\nD = 900\nC = 1000\nB = 1100\nA = 1200\n\n"
+        "Пример: /setrank C"
+    )
+    keyboard = {
+        "inline_keyboard": [
+            [ {"text": f"G ({RANK_TO_RATING['G']})", "callback_data": "setrank:G"}, {"text": f"F ({RANK_TO_RATING['F']})", "callback_data": "setrank:F"} ],
+            [ {"text": f"E ({RANK_TO_RATING['E']})", "callback_data": "setrank:E"}, {"text": f"D ({RANK_TO_RATING['D']})", "callback_data": "setrank:D"} ],
+            [ {"text": f"C ({RANK_TO_RATING['C']})", "callback_data": "setrank:C"}, {"text": f"B ({RANK_TO_RATING['B']})", "callback_data": "setrank:B"} ],
+            [ {"text": f"A ({RANK_TO_RATING['A']})", "callback_data": "setrank:A"} ],
+        ]
+    }
+    return send_message(chat_id, msg, keyboard)
+
 def setup_bot_commands():
     """Настройка команд бота"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands"
@@ -179,7 +205,7 @@ def disable_webhook():
         print(f"⚠️ Ошибка при отключении вебхука: {e}")
         return False
 
-def set_rank(chat_id, rank, first_name, last_name, username, force=False):
+def set_rank(chat_id, rank, first_name, last_name, username, force=True):
     rank = rank.upper()
     if rank not in ["G","F","E","D","C","B","A"]:
         return send_message(chat_id, "❌ Некорректный ранг. Доступны: G,F,E,D,C,B,A")
@@ -202,9 +228,17 @@ def set_rank(chat_id, rank, first_name, last_name, username, force=False):
     except Exception as e:
         return send_message(chat_id, f"❌ Ошибка установки ранга: {e}")
 
-def handle_callback_query(chat_id, callback_data):
+def handle_callback_query(chat_id, callback_data, user_info=None):
     """Обработка callback запросов от кнопок"""
-    # Все callback запросы обрабатываются в мини-приложении
+    try:
+        if callback_data.startswith("setrank:"):
+            rank = callback_data.split(":", 1)[1].strip().upper()
+            first_name = user_info.get("first_name", "Игрок") if user_info else "Игрок"
+            last_name = user_info.get("last_name", "") if user_info else ""
+            username = user_info.get("username") if user_info else None
+            return set_rank(chat_id, rank, first_name, last_name, username, force=True)
+    except Exception:
+        pass
     return False
 
 
@@ -312,13 +346,11 @@ def process_update(update):
                     parts = text.split()
                     if len(parts) >= 2:
                         raw = parts[1].strip()
-                        # Суффикс ! означает принудительную установку (force=true)
-                        force = raw.endswith('!')
                         rank = raw.rstrip('!')
                         username = user_info.get("username")
-                        return set_rank(chat_id, rank, first_name, last_name, username, force)
+                        return set_rank(chat_id, rank, first_name, last_name, username, force=True)
                     else:
-                        return send_message(chat_id, "Введите команду /setrank <ранг> (G..A)")
+                        return send_rank_prompt(chat_id)
                 elif text.strip().lower().startswith("/clear_rooms") or text == "/admin_clear_rooms":
                     print(f"🔄 Обрабатываем /clear_rooms от chat_id={chat_id} user_id={user_id}")
                     return handle_admin_clear_rooms(chat_id, user_id)
@@ -350,8 +382,8 @@ def process_update(update):
             callback_query = update["callback_query"]
             chat_id = callback_query["message"]["chat"]["id"]
             callback_data = callback_query["data"]
-            
-            return handle_callback_query(chat_id, callback_data)
+            from_info = callback_query.get("from", {})
+            return handle_callback_query(chat_id, callback_data, user_info=from_info)
         
         return True
         
