@@ -179,7 +179,7 @@ def disable_webhook():
         print(f"⚠️ Ошибка при отключении вебхука: {e}")
         return False
 
-def set_rank(chat_id, rank, first_name, last_name, username):
+def set_rank(chat_id, rank, first_name, last_name, username, force=False):
     rank = rank.upper()
     if rank not in ["G","F","E","D","C","B","A"]:
         return send_message(chat_id, "❌ Некорректный ранг. Доступны: G,F,E,D,C,B,A")
@@ -192,7 +192,8 @@ def set_rank(chat_id, rank, first_name, last_name, username):
             "username": username,
             "initial_rank": rank
         }
-        resp = requests.post(f"{API_BASE_URL}/players/set_rank", json=payload, timeout=10)
+        params = {"force": "true" if force else "false"}
+        resp = requests.post(f"{API_BASE_URL}/players/set_rank", json=payload, params=params, timeout=10)
         if resp.status_code == 200:
             p = resp.json()
             return send_message(chat_id, f"✅ Ранг установлен: {rank}. Ваш рейтинг: {p.get('rating')}")
@@ -310,9 +311,12 @@ def process_update(update):
                 elif text.lower().startswith("/setrank"):
                     parts = text.split()
                     if len(parts) >= 2:
-                        rank = parts[1].strip()
+                        raw = parts[1].strip()
+                        # Суффикс ! означает принудительную установку (force=true)
+                        force = raw.endswith('!')
+                        rank = raw.rstrip('!')
                         username = user_info.get("username")
-                        return set_rank(chat_id, rank, first_name, last_name, username)
+                        return set_rank(chat_id, rank, first_name, last_name, username, force)
                     else:
                         return send_message(chat_id, "Введите команду /setrank <ранг> (G..A)")
                 elif text.strip().lower().startswith("/clear_rooms") or text == "/admin_clear_rooms":

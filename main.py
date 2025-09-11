@@ -359,7 +359,7 @@ async def create_or_get_player(player: PlayerCreate, db: Session = Depends(get_d
 
 
 @app.post("/players/set_rank", response_model=PlayerResponse)
-async def set_player_rank(data: PlayerCreate, db: Session = Depends(get_db)):
+async def set_player_rank(data: PlayerCreate, db: Session = Depends(get_db), force: bool = False):
     """Установить начальный ранг игрока (G..A) и применить стартовый рейтинг, если не был установлен ранее."""
     try:
         player = db.query(Player).filter(Player.telegram_id == data.telegram_id).first()
@@ -367,7 +367,7 @@ async def set_player_rank(data: PlayerCreate, db: Session = Depends(get_db)):
             player = _ensure_player(db, data.telegram_id, data.first_name, data.last_name, data.username)
         if data.initial_rank:
             player.initial_rank = data.initial_rank
-            if player.games_count == 0 and player.rating in (None, 0, 1500):
+            if force or player.games_count == 0 or player.rating in (None, 0, 1500):
                 mapped = RANK_TO_RATING.get(data.initial_rank)
                 if mapped:
                     player.rating = mapped
