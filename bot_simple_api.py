@@ -223,6 +223,12 @@ def handle_start_tournament(chat_id):
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
     
     try:
+        # Проверяем нет ли активного турнира
+        check = requests.get(f"{API_BASE_URL}/tournaments/active", timeout=15)
+        if check.status_code == 200:
+            t = check.json()
+            _current_tournaments[chat_id] = t.get('id')
+            return send_message(chat_id, f"⚠️ Уже есть активный турнир #{t.get('id')}. Сначала завершите его командой /end_tournament")
         resp = requests.post(f"{API_BASE_URL}/tournaments/start", json={}, timeout=15)
         if resp.status_code == 200:
             data = resp.json()
@@ -244,13 +250,12 @@ def handle_end_tournament(chat_id):
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
     
     try:
-        tid = _current_tournaments.get(chat_id)
-        if not tid:
-            return send_message(chat_id, "❌ Не найден активный турнир в этом чате. Запустите /start_tournament или укажите ID: /end_tournament <id>")
-        resp = requests.post(f"{API_BASE_URL}/tournaments/{tid}/end", json={}, timeout=30)
+        # В системе может быть только один активный турнир — завершаем последний активный
+        resp = requests.post(f"{API_BASE_URL}/tournaments/end_latest", json={}, timeout=30)
         if resp.status_code == 200:
             data = resp.json()
             _current_tournaments.pop(chat_id, None)
+            tid = data.get('tournament_id')
             return send_message(chat_id, f"🏁 Турнир #{tid} завершен! Таблица: {data.get('sheet_url','')}")
         else:
             return send_message(chat_id, f"❌ Ошибка завершения турнира: {resp.status_code}")

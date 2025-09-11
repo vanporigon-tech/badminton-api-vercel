@@ -8,10 +8,14 @@ from datetime import datetime
 from pydantic import BaseModel
 from typing import List, Optional, Dict
 import logging
+from dotenv import load_dotenv
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Загрузка .env
+load_dotenv()
 
 # Создание FastAPI приложения
 app = FastAPI(
@@ -20,16 +24,16 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS настройки
+# CORS настройки (из переменной окружения CORS_ALLOW_ORIGINS, по умолчанию *)
+cors_origins_env = os.getenv("CORS_ALLOW_ORIGINS", "*")
+if cors_origins_env.strip() == "*":
+    allow_origins = ["*"]
+else:
+    allow_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://vanporigon-tech.github.io",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-        "http://localhost:8080",
-        "http://127.0.0.1:8080"
-    ],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,13 +41,15 @@ app.add_middleware(
 
 # Настройка базы данных
 DATABASE_URL = os.getenv(
-    "DATABASE_URL", 
-    "postgresql://user:password@localhost:5432/badminton"
+    "DATABASE_URL",
+    "postgresql://user:password@localhost:5432/badminton",
 )
 
-# Исправляем URL для Vercel PostgreSQL
+# Нормализуем URL: postgres:// → postgresql://; используем драйвер psycopg
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+if DATABASE_URL.startswith("postgresql://") and "+" not in DATABASE_URL.split("://", 1)[0]:
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -622,6 +628,53 @@ async def end_tournament(tournament_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         url = None
 
+    return {"tournament_id": t.id, "sheet_url": url}
+
+
+@app.get("/tournaments/active", response_model=TournamentResponse)
+async def get_active_tournament(db: Session = Depends(get_db)):
+    """Возвращает единственный активный турнир (если есть)."""
+    t = db.query(Tournament).filter(Tournament.is_active == True).order_by(Tournament.created_at.desc()).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Активный турнир не найден")
+    return t
+
+
+@app.post("/tournaments/end_latest")
+async def end_latest_tournament(db: Session = Depends(get_db)):
+    """Завершает последний активный турнир и создаёт таблицу. Используется ботом, если турнир один."""
+    t = db.query(Tournament).filter(Tournament.is_active == True).order_by(Tournament.created_at.desc()).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Активный турнир не найден")
+    t.is_active = False
+    t.ended_at = datetime.utcnow()
+    db.commit()
+
+    games = db.query(Game).filter(Game.tournament_id == t.id).all()
+    tournament_data = {
+        "games": [
+            {
+                "team1": [
+                    db.query(Player).filter(Player.id == gp.player_id).first().telegram_id
+                    for gp in db.query(GamePlayer).filter(GamePlayer.game_id == g.id, GamePlayer.team == 1).all()
+                ],
+                "team2": [
+                    db.query(Player).filter(Player.id == gp.player_id).first().telegram_id
+                    for gp in db.query(GamePlayer).filter(GamePlayer.game_id == g.id, GamePlayer.team == 2).all()
+                ],
+                "score1": g.score1,
+                "score2": g.score2,
+                "played_at": g.played_at.isoformat(),
+            }
+            for g in games
+        ]
+    }
+
+    try:
+        from google_sheets import create_tournament_table
+        url = create_tournament_table(t.id, tournament_data)
+    except Exception:
+        url = None
     return {"tournament_id": t.id, "sheet_url": url}
 
 @app.get("/rooms/", response_model=List[RoomResponse])
