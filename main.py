@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, ForeignKey, Float
+from sqlalchemy import create_engine, Column, Integer, BigInteger, String, DateTime, Boolean, ForeignKey, Float, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime
@@ -60,7 +60,7 @@ class Player(Base):
     __tablename__ = "players"
     
     id = Column(Integer, primary_key=True, index=True)
-    telegram_id = Column(Integer, unique=True, index=True)
+    telegram_id = Column(BigInteger, unique=True, index=True)
     first_name = Column(String, nullable=False)
     last_name = Column(String, nullable=True)
     username = Column(String, nullable=True)
@@ -154,6 +154,26 @@ try:
     logger.info("✅ Таблицы созданы успешно")
 except Exception as e:
     logger.error(f"❌ Ошибка создания таблиц: {e}")
+
+# Безопасный апгрейд типов для telegram_id → BIGINT (если ранние деплои создали INT)
+try:
+    with engine.connect() as conn:
+        # PostgreSQL: изменить тип столбца при необходимости
+        conn.execute(text("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='players' AND column_name='telegram_id' AND data_type='integer'
+                ) THEN
+                    ALTER TABLE players ALTER COLUMN telegram_id TYPE BIGINT;
+                END IF;
+            END$$;
+        """))
+        conn.commit()
+        logger.info("✅ Проверка/миграция telegram_id → BIGINT выполнена")
+except Exception as e:
+    logger.warning(f"⚠️ Не удалось выполнить онлайн-миграцию типов: {e}")
 
 # Dependency для получения сессии БД
 def get_db():
