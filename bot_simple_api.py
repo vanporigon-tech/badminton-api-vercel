@@ -267,6 +267,9 @@ def create_tournament_table(tournament_id, data):
 def process_update(update):
     """Обработка обновления от Telegram"""
     try:
+        # Логируем все входящие обновления
+        print(f"📨 Получено обновление: {update}")
+        
         # Обработка сообщений
         if "message" in update:
             message = update["message"]
@@ -277,6 +280,9 @@ def process_update(update):
             
             if "text" in message:
                 text = message["text"]
+                
+                print(f"📝 Сообщение от {chat_id}: '{text}'")
+                print(f"🔍 Проверяем права админа: {chat_id} in {ADMIN_IDS} = {chat_id in ADMIN_IDS}")
                 
                 if text == "/start":
                     username = user_info.get("username", "")
@@ -292,6 +298,7 @@ def process_update(update):
                     else:
                         return send_message(chat_id, "Введите команду /setrank <ранг> (G..A)")
                 elif text.strip().lower().startswith("/clear_rooms") or text == "/admin_clear_rooms":
+                    print(f"🔄 Обрабатываем /clear_rooms от {chat_id}")
                     return handle_admin_clear_rooms(chat_id)
                 elif text == "/start_tournament":
                     return handle_start_tournament(chat_id)
@@ -400,9 +407,13 @@ def main():
                     update_id = update["update_id"]
                     offset = update_id + 1
                     
+                    print(f"🔄 Обрабатываем update_id: {update_id}")
+                    
                     # Обрабатываем обновление
                     if not process_update(update):
                         print(f"❌ Ошибка обработки обновления {update_id}")
+                    else:
+                        print(f"✅ Успешно обработали update_id: {update_id}")
             
             # Небольшая пауза между запросами
             time.sleep(1)
