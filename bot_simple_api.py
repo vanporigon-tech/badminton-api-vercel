@@ -44,7 +44,7 @@ def send_message(chat_id, text, reply_markup=None):
         data["reply_markup"] = reply_markup
     
     try:
-        response = requests.post(url, json=data)
+        response = requests.post(url, json=data, timeout=15)
         if response.status_code == 200:
             print(f"✅ Сообщение отправлено успешно")
             return True
@@ -198,6 +198,7 @@ def handle_admin_clear_rooms(chat_id):
     if chat_id not in ADMIN_IDS:
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды.")
     try:
+        send_message(chat_id, "⏳ Очищаю комнаты...")
         # Используем админский эндпоинт массовой очистки
         print(f"🔧 Очистка через API: {API_BASE_URL}/rooms/clear_all")
         dr = requests.delete(f"{API_BASE_URL}/rooms/clear_all", timeout=30)
