@@ -64,10 +64,13 @@ class Glicko2:
             expectations.append(e)
         
         # Compute v (variance)
-        v = 0
+        v = 0.0
         for g_phi, expectation in zip(g_phis, expectations):
             v += g_phi * g_phi * expectation * (1 - expectation)
-        v = 1 / v
+        # Guard against degenerate cases where expectation is 0 or 1 exactly for all opponents
+        if v <= 0.0:
+            v = 1e-9
+        v = 1.0 / v
         
         # Compute delta
         delta = 0
@@ -135,9 +138,13 @@ class Glicko2:
             delta += g_phi * (score - expectation)
         delta = v * delta
         
-        # Update mu and phi
+        # Update mu and phi (with guards for stability)
         new_mu = mu + v * delta
-        new_phi = 1 / math.sqrt(1 / (phi * phi) + 1 / v)
+        denom = (phi * phi)
+        if denom <= 0.0:
+            denom = 1e-9
+        inv = 1.0 / denom + 1.0 / max(v, 1e-9)
+        new_phi = 1.0 / math.sqrt(inv)
         
         return new_mu, new_phi
 
