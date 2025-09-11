@@ -72,7 +72,7 @@ def setup_bot_commands():
     }
     
     try:
-        response = requests.post(url, json=data)
+        response = requests.post(url, json=data, timeout=15)
         if response.status_code == 200:
             print("✅ Команды бота настроены")
             print("📋 Доступные команды:")
@@ -353,9 +353,24 @@ def get_updates(offset=None):
 
 def main():
     """Основная функция бота"""
-    print("🤖 Запуск простого Telegram бота...")
-    print(f"📱 Токен: {BOT_TOKEN[:20]}...")
+    print("🤖 Запуск Telegram бота...")
+    if not BOT_TOKEN:
+        print("❌ BOT_TOKEN не задан. Добавьте переменную окружения BOT_TOKEN и перезапустите.")
+        return
+    # Проверка токена
+    try:
+        r = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/getMe", timeout=10)
+        if r.status_code != 200:
+            print(f"❌ Неверный BOT_TOKEN или недоступен Telegram API: {r.status_code} {r.text}")
+            return
+        me = r.json().get('result', {})
+        print(f"✅ Подключен как @{me.get('username','unknown')}")
+    except Exception as e:
+        print(f"❌ Не удалось проверить токен: {e}")
+        return
+
     print(f"🌐 Mini App URL: {MINI_APP_URL}")
+    print(f"🔗 API_BASE_URL: {API_BASE_URL}")
     print("=" * 50)
     
     # Настраиваем команды бота
