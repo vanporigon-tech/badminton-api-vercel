@@ -192,10 +192,10 @@ def handle_callback_query(chat_id, callback_data):
     return False
 
 
-def handle_admin_clear_rooms(chat_id):
+def handle_admin_clear_rooms(chat_id, user_id):
     """Админская команда очистки комнат через API"""
-    print(f"🗑️ Админская команда очистки комнат от {chat_id}")
-    if chat_id not in ADMIN_IDS:
+    print(f"🗑️ Админская команда очистки комнат от chat_id={chat_id} user_id={user_id}")
+    if user_id not in ADMIN_IDS:
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды.")
     try:
         send_message(chat_id, "⏳ Очищаю комнаты...")
@@ -213,9 +213,9 @@ def handle_admin_clear_rooms(chat_id):
 
 _current_tournaments = {}
 
-def handle_start_tournament(chat_id):
+def handle_start_tournament(chat_id, user_id):
     """Начать турнир"""
-    if chat_id not in ADMIN_IDS:
+    if user_id not in ADMIN_IDS:
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
     
     try:
@@ -240,9 +240,9 @@ def handle_start_tournament(chat_id):
         print(f"❌ Ошибка при начале турнира: {e}")
         return send_message(chat_id, f"❌ Ошибка при начале турнира: {str(e)}")
 
-def handle_end_tournament(chat_id):
+def handle_end_tournament(chat_id, user_id):
     """Завершить турнир и отправить таблицу"""
-    if chat_id not in ADMIN_IDS:
+    if user_id not in ADMIN_IDS:
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
     
     try:
@@ -284,6 +284,8 @@ def process_update(update):
                 
                 print(f"📝 Сообщение от {chat_id}: '{text}'")
                 print(f"🔍 Проверяем права админа: {chat_id} in {ADMIN_IDS} = {chat_id in ADMIN_IDS}")
+                user_id = user_info.get("id")
+                print(f"🔍 user_id={user_id} admin={user_id in ADMIN_IDS if user_id else None}")
                 
                 if text == "/start":
                     username = user_info.get("username", "")
@@ -299,14 +301,14 @@ def process_update(update):
                     else:
                         return send_message(chat_id, "Введите команду /setrank <ранг> (G..A)")
                 elif text.strip().lower().startswith("/clear_rooms") or text == "/admin_clear_rooms":
-                    print(f"🔄 Обрабатываем /clear_rooms от {chat_id}")
-                    return handle_admin_clear_rooms(chat_id)
+                    print(f"🔄 Обрабатываем /clear_rooms от chat_id={chat_id} user_id={user_id}")
+                    return handle_admin_clear_rooms(chat_id, user_id)
                 elif text == "/start_tournament":
-                    return handle_start_tournament(chat_id)
+                    return handle_start_tournament(chat_id, user_id)
                 elif text.startswith("/end_tournament"):
                     parts = text.split()
                     if len(parts) >= 2 and parts[1].isdigit():
-                        if chat_id not in ADMIN_IDS:
+                        if user_id not in ADMIN_IDS:
                             return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
                         tid = int(parts[1])
                         try:
@@ -319,7 +321,7 @@ def process_update(update):
                         except Exception as e:
                             return send_message(chat_id, f"❌ Ошибка: {e}")
                     else:
-                        return handle_end_tournament(chat_id)
+                        return handle_end_tournament(chat_id, user_id)
                 else:
                     # Игнорируем все остальные команды
                     return True
