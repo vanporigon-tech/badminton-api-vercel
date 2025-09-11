@@ -503,7 +503,14 @@ def _calculate_and_apply_ratings(db: Session, team1: List[Player], team2: List[P
     changes: Dict[int, Dict] = {}
     for player, (nr, nrd, nvol) in zip(team1, team1_new):
         old = player.rating
-        player.rating = int(round(nr))
+        proposed = int(round(nr))
+        delta = proposed - old
+        # Safety clamp to avoid absurd jumps due to numerical instability or bad inputs
+        if abs(delta) > 100:
+            logger.warning(f"⚠️ Clamping rating jump for {player.telegram_id}: {delta} → {max(-100, min(100, delta))}")
+            delta = max(-100, min(100, delta))
+            proposed = old + delta
+        player.rating = proposed
         changes[player.telegram_id] = {
             "old_rating": old,
             "new_rating": player.rating,
@@ -517,7 +524,13 @@ def _calculate_and_apply_ratings(db: Session, team1: List[Player], team2: List[P
 
     for player, (nr, nrd, nvol) in zip(team2, team2_new):
         old = player.rating
-        player.rating = int(round(nr))
+        proposed = int(round(nr))
+        delta = proposed - old
+        if abs(delta) > 100:
+            logger.warning(f"⚠️ Clamping rating jump for {player.telegram_id}: {delta} → {max(-100, min(100, delta))}")
+            delta = max(-100, min(100, delta))
+            proposed = old + delta
+        player.rating = proposed
         changes[player.telegram_id] = {
             "old_rating": old,
             "new_rating": player.rating,
