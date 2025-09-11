@@ -557,8 +557,12 @@ async def create_game(game: GameCreate, db: Session = Depends(get_db)):
             _ensure_player(db, pid) for pid in game.team2_telegram_ids
         ]
 
-        # Calculate ratings
-        changes = _calculate_and_apply_ratings(db, team1, team2, game.score1, game.score2)
+        # Calculate ratings (with guard)
+        try:
+            changes = _calculate_and_apply_ratings(db, team1, team2, game.score1, game.score2)
+        except Exception as calc_err:
+            logger.error(f"❌ Rating calc failed: {calc_err}")
+            raise HTTPException(status_code=500, detail="rating_calculation_failed")
 
         # Persist Game and per-player entries
         new_game = Game(

@@ -82,16 +82,29 @@ class Glicko2:
         a = math.log(sigma * sigma)
         tau = self.tau
         A = a
-        B = a
-        
+        # Инициализация B по рекомендациям Glicko-2: если условие не выполняется, подбираем B так, чтобы f(B) < 0
         if delta * delta > phi * phi + v:
             B = math.log(delta * delta - phi * phi - v)
+        else:
+            B = a - 1.0
+            f_b_test = self._f(B, delta, phi, v, tau)
+            # Двигаемся вниз, пока не станет < 0, чтобы избежать деления на (f_b - f_a) == 0
+            step = 1.0
+            guard_iter = 0
+            while f_b_test >= 0 and guard_iter < 50:
+                B -= step
+                f_b_test = self._f(B, delta, phi, v, tau)
+                guard_iter += 1
         
-        f_a = self._f(a, delta, phi, v, tau)
+        f_a = self._f(A, delta, phi, v, tau)
         f_b = self._f(B, delta, phi, v, tau)
         
         while abs(B - A) > 0.000001:
-            C = A + (A - B) * f_a / (f_b - f_a)
+            denom = (f_b - f_a)
+            if abs(denom) < 1e-12:
+                # Избегаем деления на ноль — небольшой сдвиг
+                denom = 1e-12 if denom >= 0 else -1e-12
+            C = A + (A - B) * f_a / denom
             f_c = self._f(C, delta, phi, v, tau)
             
             if f_c * f_b < 0:
