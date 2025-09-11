@@ -199,7 +199,9 @@ def handle_admin_clear_rooms(chat_id):
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды.")
     try:
         # Используем админский эндпоинт массовой очистки
+        print(f"🔧 Очистка через API: {API_BASE_URL}/rooms/clear_all")
         dr = requests.delete(f"{API_BASE_URL}/rooms/clear_all", timeout=30)
+        print(f"🔧 Результат очистки: status={dr.status_code} body={dr.text[:200]}")
         if dr.status_code == 200:
             data = dr.json()
             return send_message(chat_id, f"✅ Очистка завершена: rooms={data.get('rooms_deleted',0)}, members={data.get('members_deleted',0)}")
@@ -289,7 +291,7 @@ def process_update(update):
                         return set_rank(chat_id, rank, first_name, last_name, username)
                     else:
                         return send_message(chat_id, "Введите команду /setrank <ранг> (G..A)")
-                elif text.startswith("/clear_rooms") or text == "/admin_clear_rooms":
+                elif text.strip().lower().startswith("/clear_rooms") or text == "/admin_clear_rooms":
                     return handle_admin_clear_rooms(chat_id)
                 elif text == "/start_tournament":
                     return handle_start_tournament(chat_id)
