@@ -369,7 +369,31 @@ async def create_room(room: RoomCreate, db: Session = Depends(get_db)):
         creator = db.query(Player).filter(Player.telegram_id == room.creator_telegram_id).first()
         if not creator:
             raise HTTPException(status_code=404, detail="Создатель комнаты не найден")
-        
+        # Ограничение: один активный рум на пользователя
+        existing_active = db.query(Room).filter(Room.creator_id == creator.id, Room.is_active == True).first()
+        if existing_active:
+            # Возвращаем уже существующую комнату
+            members = db.query(RoomMember).filter(RoomMember.room_id == existing_active.id).all()
+            creator_full_name = f"{creator.first_name} {creator.last_name or ''}".strip()
+            return RoomResponse(
+                id=existing_active.id,
+                name=existing_active.name,
+                creator_id=existing_active.creator_id,
+                creator_full_name=creator_full_name,
+                max_players=existing_active.max_players,
+                member_count=len(members),
+                is_active=existing_active.is_active,
+                created_at=existing_active.created_at,
+                members=[
+                    RoomMemberResponse(
+                        id=m.id,
+                        player=m.player,
+                        is_leader=m.is_leader,
+                        joined_at=m.joined_at
+                    ) for m in members
+                ]
+            )
+
         # Создаем комнату
         new_room = Room(
             name=room.name,
@@ -809,8 +833,32 @@ async def leave_room(room_id: int, telegram_id: int, db: Session = Depends(get_d
     player = db.query(Player).filter(Player.telegram_id == telegram_id).first()
     if not player:
         raise HTTPException(status_code=404, detail="Игрок не найден")
-    db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.player_id == player.id).delete()
+    membership = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.player_id == player.id).first()
+    if not membership:
+        # Ничего не делаем, возвращаем текущее состояние
+        return await get_room(room_id, db)
+    is_leader = bool(membership.is_leader)
+    # Удаляем участника
+    db.delete(membership)
     db.commit()
+    if is_leader:
+        # Если вышел лидер — расформировываем комнату (делаем неактивной и чистим участников)
+        db.query(RoomMember).filter(RoomMember.room_id == room_id).delete()
+        room.is_active = False
+        db.commit()
+        # Возвращаем пустое состояние комнаты с is_active=False, чтобы фронт корректно вышел
+        return RoomResponse(
+            id=room.id,
+            name=room.name,
+            creator_id=room.creator_id,
+            creator_full_name=f"{room.creator.first_name} {room.creator.last_name or ''}".strip(),
+            max_players=room.max_players,
+            member_count=0,
+            is_active=room.is_active,
+            created_at=room.created_at,
+            members=[]
+        )
+    # Возвращаем обновлённую комнату
     return await get_room(room_id, db)
 
 @app.delete("/rooms/{room_id}")
