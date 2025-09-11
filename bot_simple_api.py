@@ -164,6 +164,21 @@ https://vanporigon-tech.github.io/badminton-rating-app
     return send_message(chat_id, help_text)
 
 
+def disable_webhook():
+    """Отключить вебхук, чтобы получать обновления через polling"""
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook"
+        resp = requests.post(url, json={"drop_pending_updates": False}, timeout=10)
+        if resp.status_code == 200 and resp.json().get("ok"):
+            print("✅ Вебхук отключён (polling активен)")
+            return True
+        else:
+            print(f"⚠️ Не удалось отключить вебхук: {resp.status_code} {resp.text}")
+            return False
+    except Exception as e:
+        print(f"⚠️ Ошибка при отключении вебхука: {e}")
+        return False
+
 def set_rank(chat_id, rank, first_name, last_name, username):
     rank = rank.upper()
     if rank not in ["G","F","E","D","C","B","A"]:
@@ -385,6 +400,9 @@ def main():
     print(f"🔗 API_BASE_URL: {API_BASE_URL}")
     print("=" * 50)
     
+    # На всякий случай отключаем вебхук (если где-то был настроен) — иначе polling не получит апдейты
+    disable_webhook()
+
     # Настраиваем команды бота
     if not setup_bot_commands():
         print("❌ Не удалось настроить команды бота")
