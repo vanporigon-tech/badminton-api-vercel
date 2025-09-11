@@ -118,6 +118,7 @@ def handle_start_command(chat_id, first_name, last_name="", username=""):
 
     # Регистрируем/обновляем игрока через API (идемпотентно)
     display_name = first_name
+    player_initial_rank = None
     try:
         payload = {
             "telegram_id": chat_id,
@@ -131,15 +132,16 @@ def handle_start_command(chat_id, first_name, last_name="", username=""):
             fn = p.get("first_name") or first_name
             ln = p.get("last_name") or ""
             display_name = f"{fn} {ln}".strip()
+            player_initial_rank = p.get("initial_rank")
     except Exception as e:
         print(f"⚠️ Не удалось зарегистрировать игрока в API: {e}")
     
-    # Создаем клавиатуру с кнопкой запуска игры
+    # Создаем клавиатуру с кнопкой запуска мини‑приложения
     keyboard = {
         "inline_keyboard": [
             [
                 {
-                    "text": "🏸 Начать игру",
+                    "text": "🏸 Открыть мини‑приложение",
                     "web_app": {
                         "url": MINI_APP_URL
                     }
@@ -148,9 +150,13 @@ def handle_start_command(chat_id, first_name, last_name="", username=""):
         ]
     }
     
-    welcome_text = f"Привет, {display_name}! 👋\n\nВыберите ваш стартовый ранг (G → A). Вы можете написать в чат команду вида: /setrank G"
-    
-    return send_message(chat_id, welcome_text, keyboard)
+    # Если ранк еще не задан — сначала просим выбрать ранг, и параллельно даём ссылку на приложение
+    if not player_initial_rank:
+        send_rank_prompt(chat_id)
+        return send_message(chat_id, f"Привет, {display_name}! 👋", keyboard)
+
+    # Повторные /start: только приветствие и ссылка
+    return send_message(chat_id, f"Привет, {display_name}! 👋", keyboard)
 
 def handle_help_command(chat_id):
     """Обработка команды /help"""
@@ -222,7 +228,10 @@ def set_rank(chat_id, rank, first_name, last_name, username, force=True):
         resp = requests.post(f"{API_BASE_URL}/players/set_rank", json=payload, params=params, timeout=10)
         if resp.status_code == 200:
             p = resp.json()
-            return send_message(chat_id, f"✅ Ранг установлен: {rank}. Ваш рейтинг: {p.get('rating')}")
+            # Подтверждение + кнопка на мини‑приложение
+            send_message(chat_id, f"✅ Ранг установлен: {rank}. Ваш рейтинг: {p.get('rating')}")
+            keyboard = {"inline_keyboard": [[{"text": "🏸 Открыть мини‑приложение", "web_app": {"url": MINI_APP_URL}}]]}
+            return send_message(chat_id, "Готово! Можно начинать игру.", keyboard)
         else:
             return send_message(chat_id, f"⚠️ Не удалось установить ранг: {resp.status_code}")
     except Exception as e:
