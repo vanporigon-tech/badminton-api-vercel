@@ -762,6 +762,21 @@ async def get_rooms(db: Session = Depends(get_db)):
         logger.error(f"❌ Ошибка получения комнат: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.delete("/rooms/clear_all")
+async def clear_all_rooms(db: Session = Depends(get_db)):
+    """Админский эндпоинт: удаляет все комнаты и участников."""
+    try:
+        count_members = db.query(RoomMember).delete()
+        count_rooms = db.query(Room).delete()
+        db.commit()
+        logger.info(f"✅ Очистка комнат: rooms={count_rooms}, members={count_members}")
+        return {"rooms_deleted": count_rooms, "members_deleted": count_members}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Ошибка очистки комнат: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/rooms/{room_id}", response_model=RoomResponse)
 async def get_room(room_id: int, db: Session = Depends(get_db)):
     """Получает детали комнаты по ID"""

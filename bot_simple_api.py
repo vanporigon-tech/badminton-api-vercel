@@ -198,20 +198,13 @@ def handle_admin_clear_rooms(chat_id):
     if chat_id not in ADMIN_IDS:
         return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды.")
     try:
-        # Получаем список комнат и удаляем их через API
-        resp = requests.get(f"{API_BASE_URL}/rooms/", timeout=20)
-        if resp.status_code != 200:
-            return send_message(chat_id, f"❌ Не удалось получить список комнат: {resp.status_code}")
-        rooms = resp.json() or []
-        deleted = 0
-        for r in rooms:
-            rid = r.get('id')
-            if not rid:
-                continue
-            dr = requests.delete(f"{API_BASE_URL}/rooms/{rid}", timeout=20)
-            if dr.status_code == 200:
-                deleted += 1
-        return send_message(chat_id, f"✅ Комнат удалено: {deleted}")
+        # Используем админский эндпоинт массовой очистки
+        dr = requests.delete(f"{API_BASE_URL}/rooms/clear_all", timeout=30)
+        if dr.status_code == 200:
+            data = dr.json()
+            return send_message(chat_id, f"✅ Очистка завершена: rooms={data.get('rooms_deleted',0)}, members={data.get('members_deleted',0)}")
+        else:
+            return send_message(chat_id, f"❌ Ошибка очистки: {dr.status_code}")
     except Exception as e:
         return send_message(chat_id, f"❌ Ошибка очистки комнат: {e}")
 
@@ -296,7 +289,7 @@ def process_update(update):
                         return set_rank(chat_id, rank, first_name, last_name, username)
                     else:
                         return send_message(chat_id, "Введите команду /setrank <ранг> (G..A)")
-                elif text == "/admin_clear_rooms":
+                elif text.startswith("/clear_rooms") or text == "/admin_clear_rooms":
                     return handle_admin_clear_rooms(chat_id)
                 elif text == "/start_tournament":
                     return handle_start_tournament(chat_id)
