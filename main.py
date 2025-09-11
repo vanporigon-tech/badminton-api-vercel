@@ -557,12 +557,39 @@ async def create_game(game: GameCreate, db: Session = Depends(get_db)):
             _ensure_player(db, pid) for pid in game.team2_telegram_ids
         ]
 
-        # Calculate ratings (with guard)
+        # Calculate ratings (with guard, fallback to safe deltas)
         try:
             changes = _calculate_and_apply_ratings(db, team1, team2, game.score1, game.score2)
         except Exception as calc_err:
-            logger.error(f"❌ Rating calc failed: {calc_err}")
-            raise HTTPException(status_code=500, detail="rating_calculation_failed")
+            logger.error(f"❌ Rating calc failed, applying fallback: {calc_err}")
+            changes = {}
+            team1_won = game.score1 > game.score2
+            team2_won = game.score2 > game.score1
+            delta_win = 10
+            delta_lose = -10
+            for p in team1:
+                old = p.rating
+                delta = delta_win if team1_won else (delta_lose if team2_won else 0)
+                p.rating = int(old + delta)
+                changes[p.telegram_id] = {
+                    "old_rating": old,
+                    "new_rating": p.rating,
+                    "rating_change": p.rating - old,
+                    "team": 1,
+                    "won": team1_won,
+                }
+            for p in team2:
+                old = p.rating
+                delta = delta_win if team2_won else (delta_lose if team1_won else 0)
+                p.rating = int(old + delta)
+                changes[p.telegram_id] = {
+                    "old_rating": old,
+                    "new_rating": p.rating,
+                    "rating_change": p.rating - old,
+                    "team": 2,
+                    "won": team2_won,
+                }
+            db.commit()
 
         # Persist Game and per-player entries
         new_game = Game(
