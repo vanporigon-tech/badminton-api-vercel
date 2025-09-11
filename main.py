@@ -2,6 +2,8 @@ import os
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, BigInteger, String, DateTime, Boolean, ForeignKey, Float, text
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.types import JSON
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime
@@ -85,6 +87,9 @@ class Room(Base):
     max_players = Column(Integer, default=4)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Состояние текущей игры и последний результат (для показа всем участникам)
+    current_game = Column(JSON().with_variant(JSONB, 'postgresql'), nullable=True)
+    last_result = Column(JSON().with_variant(JSONB, 'postgresql'), nullable=True)
     
     # Связи
     creator = relationship("Player", back_populates="rooms")
@@ -168,6 +173,19 @@ try:
                 ) THEN
                     ALTER TABLE players ALTER COLUMN telegram_id TYPE BIGINT;
                 END IF;
+                -- Добавляем JSONB поля состояния игры для комнат, если их нет
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='rooms' AND column_name='current_game'
+                ) THEN
+                    ALTER TABLE rooms ADD COLUMN current_game JSONB;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='rooms' AND column_name='last_result'
+                ) THEN
+                    ALTER TABLE rooms ADD COLUMN last_result JSONB;
+                END IF;
             END$$;
         """))
         conn.commit()
@@ -244,6 +262,10 @@ class TournamentResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class StartGameRequest(BaseModel):
+    team1_telegram_ids: List[int]
+    team2_telegram_ids: List[int]
+
 
 RANK_TO_RATING: Dict[str, int] = {
     "G": 600,
@@ -275,6 +297,8 @@ class RoomResponse(BaseModel):
     is_active: bool
     created_at: datetime
     members: List[RoomMemberResponse] = []
+    current_game: Optional[Dict] = None
+    last_result: Optional[Dict] = None
     
     class Config:
         from_attributes = True
@@ -587,6 +611,21 @@ async def create_game(game: GameCreate, db: Session = Depends(get_db)):
         except Exception:
             pass
 
+        # Обновляем состояние комнаты, чтобы все участники увидели результат
+        if game.room_id:
+            room = db.query(Room).filter(Room.id == game.room_id).first()
+            if room:
+                room.last_result = {
+                    "game_id": new_game.id,
+                    "score1": game.score1,
+                    "score2": game.score2,
+                    "rating_changes": changes,
+                    "finished_at": datetime.utcnow().isoformat()
+                }
+                room.current_game = None
+                db.add(room)
+                db.commit()
+
         return {"game_id": new_game.id, "rating_changes": changes}
     except Exception as e:
         db.rollback()
@@ -807,7 +846,9 @@ async def get_room(room_id: int, db: Session = Depends(get_db)):
                     is_leader=member.is_leader,
                     joined_at=member.joined_at
                 ) for member in members
-            ]
+            ],
+            current_game=room.current_game,
+            last_result=room.last_result
         )
         
         return result
@@ -874,6 +915,24 @@ async def leave_room(room_id: int, telegram_id: int, db: Session = Depends(get_d
             members=[]
         )
     # Возвращаем обновлённую комнату
+    return await get_room(room_id, db)
+
+
+@app.post("/rooms/{room_id}/start_game", response_model=RoomResponse)
+async def start_game(room_id: int, req: StartGameRequest, db: Session = Depends(get_db)):
+    """Помечает старт игры в комнате, чтобы все участники увидели."""
+    room = db.query(Room).filter(Room.id == room_id, Room.is_active == True).first()
+    if not room:
+        raise HTTPException(status_code=404, detail="Комната не найдена или неактивна")
+    room.current_game = {
+        "started": True,
+        "team1": req.team1_telegram_ids,
+        "team2": req.team2_telegram_ids,
+        "started_at": datetime.utcnow().isoformat()
+    }
+    room.last_result = None
+    db.add(room)
+    db.commit()
     return await get_room(room_id, db)
 
 @app.delete("/rooms/{room_id}")
