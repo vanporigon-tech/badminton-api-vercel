@@ -554,13 +554,66 @@ def _calculate_and_apply_ratings(db: Session, team1: List[Player], team2: List[P
 async def create_game(game: GameCreate, db: Session = Depends(get_db)):
     """Создать игру, обновить рейтинги Glicko-2, вернуть изменения для UI."""
     try:
+        # Validate scores
+        if game.score1 is None or game.score2 is None:
+            raise HTTPException(status_code=400, detail="Не передан счет игры")
+
+        # If teams not provided, try infer from room state/members
+        team1_ids = list(game.team1_telegram_ids or [])
+        team2_ids = list(game.team2_telegram_ids or [])
+
+        def _to_ints(values):
+            res = []
+            for v in values:
+                try:
+                    res.append(int(v))
+                except Exception:
+                    pass
+            return res
+
+        team1_ids = _to_ints(team1_ids)
+        team2_ids = _to_ints(team2_ids)
+
+        if (not team1_ids or not team2_ids) and game.room_id:
+            room = db.query(Room).filter(Room.id == game.room_id).first()
+            if not room:
+                raise HTTPException(status_code=404, detail="Комната не найдена для игры")
+            # Prefer explicit selection from room.current_game
+            if room.current_game and isinstance(room.current_game, dict):
+                t1 = _to_ints(room.current_game.get("team1", []))
+                t2 = _to_ints(room.current_game.get("team2", []))
+                if t1 and t2:
+                    team1_ids, team2_ids = t1, t2
+            # Fallback to members order
+            if not team1_ids or not team2_ids:
+                members = (
+                    db.query(RoomMember)
+                    .filter(RoomMember.room_id == room.id)
+                    .order_by(RoomMember.joined_at.asc())
+                    .all()
+                )
+                # Map to telegram_ids
+                telegram_ids: List[int] = []
+                for m in members:
+                    p = db.query(Player).filter(Player.id == m.player_id).first()
+                    if p and p.telegram_id:
+                        telegram_ids.append(int(p.telegram_id))
+                if len(telegram_ids) >= 2:
+                    if len(telegram_ids) == 2:
+                        team1_ids = [telegram_ids[0]]
+                        team2_ids = [telegram_ids[1]]
+                    elif len(telegram_ids) >= 4:
+                        team1_ids = telegram_ids[0:2]
+                        team2_ids = telegram_ids[2:4]
+
+        if not team1_ids or not team2_ids:
+            raise HTTPException(status_code=400, detail="Не удалось определить составы команд")
+        if len(team1_ids) + len(team2_ids) not in (2, 4):
+            raise HTTPException(status_code=400, detail="Поддерживаются только 1v1 или 2v2")
+
         # Ensure players
-        team1 = [
-            _ensure_player(db, pid) for pid in game.team1_telegram_ids
-        ]
-        team2 = [
-            _ensure_player(db, pid) for pid in game.team2_telegram_ids
-        ]
+        team1 = [_ensure_player(db, pid) for pid in team1_ids]
+        team2 = [_ensure_player(db, pid) for pid in team2_ids]
 
         # Calculate ratings (strict, no fallback ±10)
         changes = _calculate_and_apply_ratings(db, team1, team2, game.score1, game.score2)
