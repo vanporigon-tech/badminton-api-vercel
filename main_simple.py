@@ -332,38 +332,50 @@ async def get_room_members(room_id: int):
         conn.close()
 
 @app.post("/rooms/{room_id}/join")
-async def join_room(room_id: int, player_id: int):
-    """Присоединение к комнате"""
+async def join_room(room_id: int, player_id: int | None = Query(None), telegram_id: int | None = Query(None)):
+    """Присоединение к комнате. Принимает player_id или telegram_id."""
     conn = sqlite3.connect('badminton.db')
     cursor = conn.cursor()
-    
-    # Проверяем, не в комнате ли уже игрок
-    cursor.execute('SELECT id FROM room_members WHERE room_id = ? AND player_id = ?', (room_id, player_id))
-    if cursor.fetchone():
+
+    try:
+        # Разрешаем telegram_id → player_id, если явно не передали player_id
+        if player_id is None:
+            if telegram_id is None:
+                raise HTTPException(status_code=400, detail="Не указан player_id или telegram_id")
+            cursor.execute('SELECT id FROM players WHERE telegram_id = ?', (telegram_id,))
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Игрок не найден")
+            player_id = int(row[0])
+
+        # Проверяем, не в комнате ли уже игрок
+        cursor.execute('SELECT id FROM room_members WHERE room_id = ? AND player_id = ?', (room_id, player_id))
+        if cursor.fetchone():
+            return {"success": True, "message": "Уже в комнате"}
+
+        # Проверяем количество участников
+        cursor.execute('SELECT COUNT(*) FROM room_members WHERE room_id = ?', (room_id,))
+        member_count = cursor.fetchone()[0]
+
+        cursor.execute('SELECT max_players FROM rooms WHERE id = ?', (room_id,))
+        max_players_row = cursor.fetchone()
+        if not max_players_row:
+            raise HTTPException(status_code=404, detail="Комната не найдена")
+        max_players = max_players_row[0]
+
+        if member_count >= max_players:
+            raise HTTPException(status_code=400, detail="Комната заполнена")
+
+        # Добавляем игрока
+        cursor.execute('''
+            INSERT INTO room_members (room_id, player_id, is_leader)
+            VALUES (?, ?, 0)
+        ''', (room_id, player_id))
+
+        conn.commit()
+        return {"success": True, "message": "Успешно присоединились к комнате"}
+    finally:
         conn.close()
-        return {"success": True, "message": "Уже в комнате"}
-    
-    # Проверяем количество участников
-    cursor.execute('SELECT COUNT(*) FROM room_members WHERE room_id = ?', (room_id,))
-    member_count = cursor.fetchone()[0]
-    
-    cursor.execute('SELECT max_players FROM rooms WHERE id = ?', (room_id,))
-    max_players = cursor.fetchone()[0]
-    
-    if member_count >= max_players:
-        conn.close()
-        raise HTTPException(status_code=400, detail="Комната заполнена")
-    
-    # Добавляем игрока
-    cursor.execute('''
-        INSERT INTO room_members (room_id, player_id, is_leader)
-        VALUES (?, ?, 0)
-    ''', (room_id, player_id))
-    
-    conn.commit()
-    conn.close()
-    
-    return {"success": True, "message": "Успешно присоединились к комнате"}
 
 @app.post("/rooms/{room_id}/start")
 async def start_game(room_id: int, leader_data: dict):

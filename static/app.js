@@ -379,7 +379,7 @@ async function joinRoom(roomId) {
         
         const player = await playerResponse.json();
         
-        const response = await fetch(`/rooms/${roomId}/join?player_id=${player.id}`, {
+        const response = await fetch(`/rooms/${roomId}/join?telegram_id=${currentUser.id}`, {
             method: 'POST'
         });
         
@@ -389,8 +389,21 @@ async function joinRoom(roomId) {
                 showRoomDetails(roomId);
             }, 1500);
         } else {
-            const error = await response.json();
-            showMessage(error.detail || 'Ошибка присоединения', 'error');
+            // Если пользователь уже состоит в комнате, считаем это успехом
+            try {
+                const data = await response.json();
+                const msg = (data && data.detail) || '';
+                if (msg.includes('Уже в комнате') || msg.includes('already') || response.status === 409) {
+                    showMessage('Вы уже в этой комнате', 'info');
+                    setTimeout(() => {
+                        showRoomDetails(roomId);
+                    }, 800);
+                } else {
+                    showMessage(msg || 'Ошибка присоединения', 'error');
+                }
+            } catch (e) {
+                showMessage('Ошибка присоединения', 'error');
+            }
         }
     } catch (error) {
         console.error('Join room error:', error);
@@ -632,7 +645,7 @@ async function leaveRoom(roomId) {
         
         const player = await playerResponse.json();
         
-        const response = await fetch(`/rooms/${roomId}/leave?player_id=${player.id}`, {
+        const response = await fetch(`/rooms/${roomId}/leave?telegram_id=${currentUser.id}`, {
             method: 'POST'
         });
         
@@ -867,7 +880,7 @@ async function handleJoinRoom() {
         
         const player = await playerResponse.json();
         
-        const response = await fetch(`/rooms/${currentRoom.id}/join?player_id=${player.id}`);
+        const response = await fetch(`/rooms/${currentRoom.id}/join?telegram_id=${currentUser.id}`);
         
         if (response.ok) {
             const result = await response.json();
