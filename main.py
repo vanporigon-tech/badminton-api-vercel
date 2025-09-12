@@ -506,10 +506,12 @@ def _calculate_and_apply_ratings(db: Session, team1: List[Player], team2: List[P
         old = player.rating
         proposed = int(round(nr))
         delta = proposed - old
-        # Safety clamp to avoid absurd jumps due to numerical instability or bad inputs
-        if abs(delta) > 100:
-            logger.warning(f"⚠️ Clamping rating jump for {player.telegram_id}: {delta} → {max(-100, min(100, delta))}")
-            delta = max(-100, min(100, delta))
+        # RD-aware clamp: larger RD allows slightly bigger moves, small RD tightens
+        rd = float(player.rd or 350.0)
+        cap = 30 if rd < 100 else (40 if rd < 200 else (60 if rd < 300 else 80))
+        if abs(delta) > cap:
+            logger.info(f"↔️ Clamp t1 {player.telegram_id}: {delta} → {max(-cap, min(cap, delta))} (RD={rd:.1f})")
+            delta = max(-cap, min(cap, delta))
             proposed = old + delta
         player.rating = proposed
         changes[player.telegram_id] = {
@@ -527,9 +529,11 @@ def _calculate_and_apply_ratings(db: Session, team1: List[Player], team2: List[P
         old = player.rating
         proposed = int(round(nr))
         delta = proposed - old
-        if abs(delta) > 100:
-            logger.warning(f"⚠️ Clamping rating jump for {player.telegram_id}: {delta} → {max(-100, min(100, delta))}")
-            delta = max(-100, min(100, delta))
+        rd = float(player.rd or 350.0)
+        cap = 30 if rd < 100 else (40 if rd < 200 else (60 if rd < 300 else 80))
+        if abs(delta) > cap:
+            logger.info(f"↔️ Clamp t2 {player.telegram_id}: {delta} → {max(-cap, min(cap, delta))} (RD={rd:.1f})")
+            delta = max(-cap, min(cap, delta))
             proposed = old + delta
         player.rating = proposed
         changes[player.telegram_id] = {

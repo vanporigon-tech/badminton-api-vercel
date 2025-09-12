@@ -4,7 +4,7 @@ from typing import Tuple, List
 class Glicko2:
     """Implementation of Glicko-2 rating system"""
     
-    def __init__(self, tau: float = 0.5):
+    def __init__(self, tau: float = 0.3):
         self.tau = tau  # System constant
     
     def calculate_new_rating(self, rating: float, rd: float, volatility: float, 
