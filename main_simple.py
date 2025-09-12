@@ -394,9 +394,9 @@ async def start_game(room_id: int, leader_data: dict):
         if member_count == 3:
             raise HTTPException(status_code=400, detail="Недостаточно игроков для начала игры (нужно 2 или 4)")
         
-        # Начинаем игру
+        # Начинаем игру: помечаем как стартовавшую и убираем из поиска
         cursor.execute('''
-            UPDATE rooms SET is_game_started = 1 
+            UPDATE rooms SET is_game_started = 1, is_active = 0
             WHERE id = ?
         ''', (room_id,))
         

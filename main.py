@@ -1003,6 +1003,8 @@ async def start_game(room_id: int, req: StartGameRequest, db: Session = Depends(
         "started_at": datetime.utcnow().isoformat()
     }
     room.last_result = None
+    # Убираем комнату из поиска сразу после старта игры
+    room.is_active = False
     db.add(room)
     db.commit()
     return await get_room(room_id, db)
