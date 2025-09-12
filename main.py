@@ -942,22 +942,25 @@ async def leave_room(room_id: int, telegram_id: int, db: Session = Depends(get_d
     db.delete(membership)
     db.commit()
     if is_leader:
-        # Если вышел лидер — расформировываем комнату (делаем неактивной и чистим участников)
+        # Если вышел лидер — расформировываем комнату (удаляем всех участников и саму комнату),
+        # чтобы она гарантированно не появлялась в поиске
         db.query(RoomMember).filter(RoomMember.room_id == room_id).delete()
-        room.is_active = False
-        db.commit()
-        # Возвращаем пустое состояние комнаты с is_active=False, чтобы фронт корректно вышел
-        return RoomResponse(
+        # Подготовим ответ до удаления комнаты
+        response = RoomResponse(
             id=room.id,
             name=room.name,
             creator_id=room.creator_id,
             creator_full_name=f"{room.creator.first_name} {room.creator.last_name or ''}".strip(),
             max_players=room.max_players,
             member_count=0,
-            is_active=room.is_active,
+            is_active=False,
             created_at=room.created_at,
             members=[]
         )
+        # Удаляем комнату целиком
+        db.delete(room)
+        db.commit()
+        return response
     # Возвращаем обновлённую комнату
     return await get_room(room_id, db)
 
