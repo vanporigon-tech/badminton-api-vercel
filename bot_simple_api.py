@@ -200,7 +200,9 @@ def disable_webhook():
     """Отключить вебхук, чтобы получать обновления через polling"""
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/deleteWebhook"
-        resp = requests.post(url, json={"drop_pending_updates": False}, timeout=10)
+        # Сбрасываем непрочитанные апдейты и гарантированно отключаем вебхук,
+        # чтобы избежать 409 Conflict при getUpdates
+        resp = requests.post(url, json={"drop_pending_updates": True}, timeout=10)
         if resp.status_code == 200 and resp.json().get("ok"):
             print("✅ Вебхук отключён (polling активен)")
             return True
@@ -360,7 +362,7 @@ def process_update(update):
                         return set_rank(chat_id, rank, first_name, last_name, username, force=True)
                     else:
                         return send_rank_prompt(chat_id)
-                elif text.strip().lower().startswith("/clear_rooms") or text == "/admin_clear_rooms":
+                elif text.strip().lower().startswith(("/clear_rooms", "/clearrooms", "/clear-rooms", "/clear")) or text == "/admin_clear_rooms":
                     print(f"🔄 Обрабатываем /clear_rooms от chat_id={chat_id} user_id={user_id}")
                     return handle_admin_clear_rooms(chat_id, user_id)
                 elif text == "/start_tournament":
