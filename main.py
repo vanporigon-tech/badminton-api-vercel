@@ -70,6 +70,8 @@ class Player(Base):
     rd = Column(Float, default=350.0)
     volatility = Column(Float, default=0.06)
     initial_rank = Column(String, nullable=True)  # 'G'..'A'
+    # Количество дополнительных смен начального ранга (после первого выбора)
+    rank_changes_used = Column(Integer, default=0)
     games_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     
@@ -185,6 +187,13 @@ try:
                     WHERE table_name='rooms' AND column_name='last_result'
                 ) THEN
                     ALTER TABLE rooms ADD COLUMN last_result JSONB;
+                END IF;
+                -- Добавляем поле rank_changes_used для ограничения повторной смены ранга
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name='players' AND column_name='rank_changes_used'
+                ) THEN
+                    ALTER TABLE players ADD COLUMN rank_changes_used INTEGER DEFAULT 0;
                 END IF;
             END$$;
         """))
@@ -366,11 +375,17 @@ async def set_player_rank(data: PlayerCreate, db: Session = Depends(get_db), for
         if not player:
             player = _ensure_player(db, data.telegram_id, data.first_name, data.last_name, data.username)
         if data.initial_rank:
+            # Ограничение: первый выбор ранга разрешен всегда; повторно — только один раз
+            can_apply = force or player.games_count == 0 or player.rating in (None, 0, 1500) or (player.rank_changes_used or 0) < 1
+            if not can_apply:
+                raise HTTPException(status_code=400, detail="Лимит изменения ранга исчерпан")
             player.initial_rank = data.initial_rank
-            if force or player.games_count == 0 or player.rating in (None, 0, 1500):
-                mapped = RANK_TO_RATING.get(data.initial_rank)
-                if mapped:
-                    player.rating = mapped
+            mapped = RANK_TO_RATING.get(data.initial_rank)
+            if mapped:
+                player.rating = mapped
+            # Если это не первый заход, считаем это использованием дополнительной смены
+            if player.games_count > 0 and player.rating not in (None, 0, 1500):
+                player.rank_changes_used = (player.rank_changes_used or 0) + 1
         db.commit()
         db.refresh(player)
         return player
@@ -384,6 +399,26 @@ async def get_player(telegram_id: int, db: Session = Depends(get_db)):
     if not player:
         raise HTTPException(status_code=404, detail="Игрок не найден")
     return player
+
+@app.post("/players/set_rating")
+async def admin_set_player_rating(telegram_id: int, rating: int, db: Session = Depends(get_db)):
+    """Админский эндпоинт: установить рейтинг игроку по telegram_id."""
+    try:
+        player = db.query(Player).filter(Player.telegram_id == telegram_id).first()
+        if not player:
+            raise HTTPException(status_code=404, detail="Игрок не найден")
+        old = player.rating or 1500
+        player.rating = int(rating)
+        db.commit()
+        return {"telegram_id": telegram_id, "old_rating": old, "new_rating": player.rating}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/players", response_model=List[PlayerResponse])
+async def list_players(db: Session = Depends(get_db)):
+    players = db.query(Player).order_by(Player.rating.desc()).all()
+    return players
 
 @app.post("/rooms/", response_model=RoomResponse)
 async def create_room(room: RoomCreate, db: Session = Depends(get_db)):
@@ -513,6 +548,14 @@ def _calculate_and_apply_ratings(db: Session, team1: List[Player], team2: List[P
             logger.info(f"↔️ Clamp t1 {player.telegram_id}: {delta} → {max(-cap, min(cap, delta))} (RD={rd:.1f})")
             delta = max(-cap, min(cap, delta))
             proposed = old + delta
+        # Scale progression: divide effective delta by 5 to slow down level ups
+        scaled = int(round(delta / 5.0))
+        # Ensure at least 1 point change if delta != 0
+        if delta > 0 and scaled == 0:
+            scaled = 1
+        if delta < 0 and scaled == 0:
+            scaled = -1
+        proposed = old + scaled
         player.rating = proposed
         changes[player.telegram_id] = {
             "old_rating": old,
@@ -535,6 +578,12 @@ def _calculate_and_apply_ratings(db: Session, team1: List[Player], team2: List[P
             logger.info(f"↔️ Clamp t2 {player.telegram_id}: {delta} → {max(-cap, min(cap, delta))} (RD={rd:.1f})")
             delta = max(-cap, min(cap, delta))
             proposed = old + delta
+        scaled = int(round(delta / 5.0))
+        if delta > 0 and scaled == 0:
+            scaled = 1
+        if delta < 0 and scaled == 0:
+            scaled = -1
+        proposed = old + scaled
         player.rating = proposed
         changes[player.telegram_id] = {
             "old_rating": old,

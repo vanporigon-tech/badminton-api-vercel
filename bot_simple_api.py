@@ -365,6 +365,25 @@ def process_update(update):
                 elif text.strip().lower().startswith(("/clear_rooms", "/clearrooms", "/clear-rooms", "/clear")) or text == "/admin_clear_rooms":
                     print(f"🔄 Обрабатываем /clear_rooms от chat_id={chat_id} user_id={user_id}")
                     return handle_admin_clear_rooms(chat_id, user_id)
+                elif text.strip().lower().startswith("/setrating"):
+                    # /setrating <telegram_id> <rating>
+                    parts = text.split()
+                    if len(parts) >= 3 and parts[1].isdigit() and parts[2].lstrip("-").isdigit():
+                        if user_id not in ADMIN_IDS:
+                            return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды")
+                        tg_id = int(parts[1])
+                        rating = int(parts[2])
+                        try:
+                            resp = requests.post(f"{API_BASE_URL}/players/set_rating", params={"telegram_id": tg_id, "rating": rating}, timeout=15)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                return send_message(chat_id, f"✅ Рейтинг обновлен: {tg_id} → {data.get('new_rating')}")
+                            else:
+                                return send_message(chat_id, f"❌ Ошибка обновления рейтинга: {resp.status_code}")
+                        except Exception as e:
+                            return send_message(chat_id, f"❌ Ошибка: {e}")
+                    else:
+                        return send_message(chat_id, "Использование: /setrating <telegram_id> <rating>")
                 elif text == "/start_tournament":
                     return handle_start_tournament(chat_id, user_id)
                 elif text.startswith("/end_tournament"):
