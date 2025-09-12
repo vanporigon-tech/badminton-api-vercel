@@ -72,32 +72,29 @@ class Glicko2:
             v = 1e-9
         v = 1.0 / v
         
-        # Compute delta
-        delta = 0
+        # Compute sum term and delta
+        sum_term = 0.0
         for i, (g_phi, expectation, score) in enumerate(zip(g_phis, expectations, scores)):
-            delta += g_phi * (score - expectation)
-        delta = v * delta
+            sum_term += g_phi * (score - expectation)
+        delta = v * sum_term
         
-        # Iterative algorithm for volatility
-        a = math.log(sigma * sigma)
+        # Iterative algorithm for volatility (Glickman 2012)
+        a = math.log(max(1e-9, sigma) * max(1e-9, sigma))  # ln(sigma^2)
         tau = self.tau
         A = a
-        # Инициализация B по рекомендациям Glicko-2: если условие не выполняется, подбираем B так, чтобы f(B) < 0
+        # Initialize B
         if delta * delta > phi * phi + v:
             B = math.log(delta * delta - phi * phi - v)
         else:
-            B = a - 1.0
-            f_b_test = self._f(B, delta, phi, v, tau)
-            # Двигаемся вниз, пока не станет < 0, чтобы избежать деления на (f_b - f_a) == 0
-            step = 1.0
-            guard_iter = 0
-            while f_b_test >= 0 and guard_iter < 50:
-                B -= step
-                f_b_test = self._f(B, delta, phi, v, tau)
-                guard_iter += 1
+            # Find B such that f(B) < 0
+            k = 1
+            B = a - k * tau
+            while self._f(B, a, delta, phi, v, tau) >= 0 and k < 50:
+                k += 1
+                B = a - k * tau
         
-        f_a = self._f(A, delta, phi, v, tau)
-        f_b = self._f(B, delta, phi, v, tau)
+        f_a = self._f(A, a, delta, phi, v, tau)
+        f_b = self._f(B, a, delta, phi, v, tau)
         
         while abs(B - A) > 0.000001:
             denom = (f_b - f_a)
@@ -105,7 +102,7 @@ class Glicko2:
                 # Избегаем деления на ноль — небольшой сдвиг
                 denom = 1e-12 if denom >= 0 else -1e-12
             C = A + (A - B) * f_a / denom
-            f_c = self._f(C, delta, phi, v, tau)
+            f_c = self._f(C, a, delta, phi, v, tau)
             
             if f_c * f_b < 0:
                 A = B
@@ -118,10 +115,11 @@ class Glicko2:
         
         return math.exp(A / 2)
     
-    def _f(self, x: float, delta: float, phi: float, v: float, tau: float) -> float:
-        """Helper function for volatility computation"""
+    def _f(self, x: float, a: float, delta: float, phi: float, v: float, tau: float) -> float:
+        """Helper function for volatility computation (uses a=ln(sigma^2))"""
         ex = math.exp(x)
-        return (ex * (delta * delta - phi * phi - v - ex)) / (2 * (phi * phi + v + ex) * (phi * phi + v + ex)) - (x - math.log(tau * tau)) / (tau * tau)
+        denom = (phi * phi + v + ex)
+        return (ex * (delta * delta - phi * phi - v - ex)) / (2 * denom * denom) - (x - a) / (tau * tau)
     
     def _update_rating(self, mu: float, phi: float, opponent_ratings: List[float], 
                       opponent_rds: List[float], scores: List[float]) -> Tuple[float, float]:
@@ -147,19 +145,20 @@ class Glicko2:
             v = 1e-9
         v = 1.0 / v
         
-        # Compute delta
-        delta = 0
+        # Compute sum term and delta
+        sum_term = 0.0
         for i, (g_phi, expectation, score) in enumerate(zip(g_phis, expectations, scores)):
-            delta += g_phi * (score - expectation)
-        delta = v * delta
+            sum_term += g_phi * (score - expectation)
+        delta = v * sum_term
         
         # Update mu and phi (with guards for stability)
-        new_mu = mu + v * delta
         denom = (phi * phi)
         if denom <= 0.0:
             denom = 1e-9
         inv = 1.0 / denom + 1.0 / max(v, 1e-9)
         new_phi = 1.0 / math.sqrt(inv)
+        # Correct Glicko-2 update for mu
+        new_mu = mu + (new_phi * new_phi) * sum_term
         
         return new_mu, new_phi
 
