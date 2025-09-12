@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, Column, Integer, BigInteger, String, DateTime, Boolean, ForeignKey, Float, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -392,7 +392,8 @@ async def create_room(room: RoomCreate, db: Session = Depends(get_db)):
         # Находим игрока-создателя
         creator = db.query(Player).filter(Player.telegram_id == room.creator_telegram_id).first()
         if not creator:
-            raise HTTPException(status_code=404, detail="Создатель комнаты не найден")
+            # Автосоздание игрока, чтобы фронту не делать лишний вызов
+            creator = _ensure_player(db, room.creator_telegram_id)
         # Ограничение: один активный рум на пользователя
         existing_active = db.query(Room).filter(Room.creator_id == creator.id, Room.is_active == True).first()
         if existing_active:
@@ -805,11 +806,14 @@ async def end_latest_tournament(db: Session = Depends(get_db)):
     return {"tournament_id": t.id, "sheet_url": url}
 
 @app.get("/rooms/", response_model=List[RoomResponse])
-async def get_rooms(db: Session = Depends(get_db)):
+async def get_rooms(response: Response, db: Session = Depends(get_db)):
     """Получает список всех активных комнат"""
     try:
         rooms = db.query(Room).filter(Room.is_active == True).all()
         
+        # Отключаем кэширование списков комнат
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
         result = []
         for room in rooms:
             # Получаем всех участников комнаты
@@ -861,7 +865,7 @@ async def clear_all_rooms(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/rooms/{room_id}", response_model=RoomResponse)
-async def get_room(room_id: int, db: Session = Depends(get_db)):
+async def get_room(room_id: int, response: Response, db: Session = Depends(get_db)):
     """Получает детали комнаты по ID"""
     try:
         room = db.query(Room).filter(Room.id == room_id).first()
@@ -874,6 +878,9 @@ async def get_room(room_id: int, db: Session = Depends(get_db)):
         # Формируем полное имя создателя
         creator_full_name = f"{room.creator.first_name} {room.creator.last_name or ''}".strip()
         
+        # Отключаем кэширование деталей комнаты
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
         result = RoomResponse(
             id=room.id,
             name=room.name,
@@ -935,7 +942,25 @@ async def leave_room(room_id: int, telegram_id: int, db: Session = Depends(get_d
         raise HTTPException(status_code=404, detail="Игрок не найден")
     membership = db.query(RoomMember).filter(RoomMember.room_id == room_id, RoomMember.player_id == player.id).first()
     if not membership:
-        # Ничего не делаем, возвращаем текущее состояние
+        # Если участник не найден, но это создатель — удаляем комнату (случай рассинхрона ID)
+        if room.creator and room.creator.telegram_id == telegram_id:
+            db.query(RoomMember).filter(RoomMember.room_id == room_id).delete()
+            # Ответ до удаления комнаты
+            response = RoomResponse(
+                id=room.id,
+                name=room.name,
+                creator_id=room.creator_id,
+                creator_full_name=f"{room.creator.first_name} {room.creator.last_name or ''}".strip(),
+                max_players=room.max_players,
+                member_count=0,
+                is_active=False,
+                created_at=room.created_at,
+                members=[]
+            )
+            db.delete(room)
+            db.commit()
+            return response
+        # Иначе — возвращаем текущее состояние без изменений
         return await get_room(room_id, db)
     is_leader = bool(membership.is_leader)
     # Удаляем участника
