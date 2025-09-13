@@ -60,9 +60,9 @@ RANK_TO_RATING = {
     "F": 700,
     "E": 800,
     "D": 900,
-    "C": 1000,
-    "B": 1100,
-    "A": 1200,
+    "C": 1100,
+    "B": 1400,
+    "A": 1700,
 }
 
 def send_rank_prompt(chat_id):

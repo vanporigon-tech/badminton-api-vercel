@@ -281,9 +281,9 @@ RANK_TO_RATING: Dict[str, int] = {
     "F": 700,
     "E": 800,
     "D": 900,
-    "C": 1000,
-    "B": 1100,
-    "A": 1200,
+    "C": 1100,
+    "B": 1400,
+    "A": 1700,
 }
 
 def _ensure_player(db: Session, telegram_id: int, first_name: str = "Игрок", last_name: Optional[str] = None, username: Optional[str] = None) -> Player:
