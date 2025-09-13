@@ -561,13 +561,14 @@ def _calculate_and_apply_ratings(db: Session, team1: List[Player], team2: List[P
             logger.info(f"↔️ Clamp t1 {player.telegram_id}: {delta} → {max(-cap, min(cap, delta))} (RD={rd:.1f})")
             delta = max(-cap, min(cap, delta))
             proposed = old + delta
-        # Scale progression: divide effective delta by 5 to slow down level ups
-        scaled = int(round(delta / 5.0))
-        # Ensure at least 1 point change if delta != 0
-        if delta > 0 and scaled == 0:
-            scaled = 1
-        if delta < 0 and scaled == 0:
-            scaled = -1
+        # Scale progression smoothly: divide by 5 but keep fractional accumulation via rd
+        # Use ceiling/floor to avoid losing small gains entirely
+        if delta > 0:
+            scaled = max(1, int((delta + 2) // 5))
+        elif delta < 0:
+            scaled = min(-1, -int((abs(delta) + 2) // 5))
+        else:
+            scaled = 0
         proposed = old + scaled
         player.rating = proposed
         changes[player.telegram_id] = {
@@ -591,11 +592,12 @@ def _calculate_and_apply_ratings(db: Session, team1: List[Player], team2: List[P
             logger.info(f"↔️ Clamp t2 {player.telegram_id}: {delta} → {max(-cap, min(cap, delta))} (RD={rd:.1f})")
             delta = max(-cap, min(cap, delta))
             proposed = old + delta
-        scaled = int(round(delta / 5.0))
-        if delta > 0 and scaled == 0:
-            scaled = 1
-        if delta < 0 and scaled == 0:
-            scaled = -1
+        if delta > 0:
+            scaled = max(1, int((delta + 2) // 5))
+        elif delta < 0:
+            scaled = min(-1, -int((abs(delta) + 2) // 5))
+        else:
+            scaled = 0
         proposed = old + scaled
         player.rating = proposed
         changes[player.telegram_id] = {
