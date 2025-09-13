@@ -375,8 +375,21 @@ async def set_player_rank(data: PlayerCreate, db: Session = Depends(get_db), for
         if not player:
             player = _ensure_player(db, data.telegram_id, data.first_name, data.last_name, data.username)
         if data.initial_rank:
-            # Ограничение: первый выбор ранга разрешен всегда; повторно — только один раз
-            can_apply = force or player.games_count == 0 or player.rating in (None, 0, 1500) or (player.rank_changes_used or 0) < 1
+            # Админам всегда можно менять ранг (по TELEGRAM ID в ADMIN_IDS)
+            admin_ids = set()
+            raw_admins = os.getenv("ADMIN_IDS", "").strip()
+            if raw_admins:
+                for tok in raw_admins.split(","):
+                    tok = tok.strip()
+                    if tok.isdigit():
+                        try:
+                            admin_ids.add(int(tok))
+                        except Exception:
+                            pass
+            is_admin = player.telegram_id in admin_ids
+
+            # Ограничение: первый выбор ранга разрешен всегда; повторно — только один раз (кроме админов)
+            can_apply = is_admin or force or player.games_count == 0 or player.rating in (None, 0, 1500) or (player.rank_changes_used or 0) < 1
             if not can_apply:
                 raise HTTPException(status_code=400, detail="Лимит изменения ранга исчерпан")
             player.initial_rank = data.initial_rank
@@ -384,7 +397,7 @@ async def set_player_rank(data: PlayerCreate, db: Session = Depends(get_db), for
             if mapped:
                 player.rating = mapped
             # Если это не первый заход, считаем это использованием дополнительной смены
-            if player.games_count > 0 and player.rating not in (None, 0, 1500):
+            if (not is_admin) and player.games_count > 0 and player.rating not in (None, 0, 1500):
                 player.rank_changes_used = (player.rank_changes_used or 0) + 1
         db.commit()
         db.refresh(player)
