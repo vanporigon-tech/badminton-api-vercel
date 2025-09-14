@@ -369,19 +369,16 @@ async def create_or_get_player(player: PlayerCreate, db: Session = Depends(get_d
 
 @app.post("/players/set_rank", response_model=PlayerResponse)
 async def set_player_rank(data: PlayerCreate, db: Session = Depends(get_db), force: bool = False):
-    """Установить начальный ранг игрока (G..A) и применить стартовый рейтинг, если не был установлен ранее."""
+    """Установить начальный ранг игрока (G..A) и применить стартовый рейтинг, даже если уже были игры."""
     try:
         player = db.query(Player).filter(Player.telegram_id == data.telegram_id).first()
         if not player:
             player = _ensure_player(db, data.telegram_id, data.first_name, data.last_name, data.username)
         if data.initial_rank:
-            # --- УБРАНЫ ОГРАНИЧЕНИЯ ---
-            # Любой пользователь может менять ранг неограниченно
             player.initial_rank = data.initial_rank
             mapped = RANK_TO_RATING.get(data.initial_rank)
             if mapped:
-                player.rating = mapped
-            # Не увеличиваем rank_changes_used, не проверяем лимиты и админов
+                player.rating = mapped  # ВСЕГДА обновляем рейтинг по рангу
         db.commit()
         db.refresh(player)
         return player

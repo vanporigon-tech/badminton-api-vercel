@@ -213,31 +213,41 @@ def disable_webhook():
         print(f"⚠️ Ошибка при отключении вебхука: {e}")
         return False
 
-def set_rank(chat_id, rank, first_name, last_name, username, force=True):
-    rank = rank.upper()
-    if rank not in ["G","F","E","D","C","B","A"]:
-        return send_message(chat_id, "❌ Некорректный ранг. Доступны: G,F,E,D,C,B,A")
+def set_rank(chat_id, rank, first_name, last_name, username, force=False):
+    """Установить ранг игрока через API и принудительно выставить соответствующий рейтинг"""
+    print(f"[DEBUG] set_rank: chat_id={chat_id}, rank={rank}, user={username}, force={force}")
     try:
-        # Call backend API to set rank
         payload = {
             "telegram_id": chat_id,
-            "first_name": first_name or "Игрок",
-            "last_name": last_name or "",
+            # API ожидает initial_rank
+            "initial_rank": rank,
+            "first_name": first_name,
+            "last_name": last_name,
             "username": username,
-            "initial_rank": rank
+            "force": force
         }
-        params = {"force": "true" if force else "false"}
-        resp = requests.post(f"{API_BASE_URL}/players/set_rank", json=payload, params=params, timeout=10)
+        print(f"[DEBUG] set_rank payload: {payload}")
+        resp = requests.post(f"{API_BASE_URL}/players/set_rank", json=payload, timeout=10)
+        print(f"[DEBUG] set_rank API response: {resp.status_code} {resp.text}")
+        # Дополнительно принудительно выставим рейтинг по рангу
+        target_rating = RANK_TO_RATING.get(rank)
+        if target_rating is not None:
+            try:
+                sr = requests.post(
+                    f"{API_BASE_URL}/players/set_rating",
+                    params={"telegram_id": chat_id, "rating": target_rating},
+                    timeout=10,
+                )
+                print(f"[DEBUG] set_rating API response: {sr.status_code} {sr.text}")
+            except Exception as e:
+                print(f"[DEBUG] Исключение при set_rating: {e}")
         if resp.status_code == 200:
-            p = resp.json()
-            # Подтверждение + кнопка на мини‑приложение
-            send_message(chat_id, f"✅ Ранг установлен: {rank}. Ваш рейтинг: {p.get('rating')}")
-            keyboard = {"inline_keyboard": [[{"text": "🏸 Открыть мини‑приложение", "web_app": {"url": MINI_APP_URL}}]]}
-            return send_message(chat_id, "Готово! Можно начинать игру.", keyboard)
+            return send_message(chat_id, "✅ Ранг успешно изменён!")
         else:
-            return send_message(chat_id, f"⚠️ Не удалось установить ранг: {resp.status_code}")
+            return send_message(chat_id, f"❌ Не удалось изменить ранг. Код: {resp.status_code}\nОтвет: {resp.text}")
     except Exception as e:
-        return send_message(chat_id, f"❌ Ошибка установки ранга: {e}")
+        print(f"[DEBUG] Исключение в set_rank: {e}")
+        return send_message(chat_id, f"❌ Ошибка при изменении ранга: {e}")
 
 def handle_callback_query(chat_id, callback_data, user_info=None):
     """Обработка callback запросов от кнопок"""
@@ -256,20 +266,29 @@ def handle_callback_query(chat_id, callback_data, user_info=None):
 def handle_admin_clear_rooms(chat_id, user_id):
     """Админская команда очистки комнат через API"""
     print(f"🗑️ Админская команда очистки комнат от chat_id={chat_id} user_id={user_id}")
+    print(f"[DEBUG] ADMIN_IDS: {ADMIN_IDS}")
     if user_id not in ADMIN_IDS:
-        return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды.")
+        print(f"[DEBUG] user_id {user_id} не найден в ADMIN_IDS")
+        return send_message(chat_id, "❌ У вас нет прав для выполнения этой команды. Ваш user_id: {}".format(user_id))
     try:
         send_message(chat_id, "⏳ Очищаю комнаты...")
-        # Используем админский эндпоинт массовой очистки
         print(f"🔧 Очистка через API: {API_BASE_URL}/rooms/clear_all")
         dr = requests.delete(f"{API_BASE_URL}/rooms/clear_all", timeout=30)
         print(f"🔧 Результат очистки: status={dr.status_code} body={dr.text[:200]}")
         if dr.status_code == 200:
-            data = dr.json()
-            return send_message(chat_id, f"✅ Очистка завершена: rooms={data.get('rooms_deleted',0)}, members={data.get('members_deleted',0)}")
+            try:
+                data = dr.json()
+                msg = f"✅ Очистка завершена: rooms={data.get('rooms_deleted',0)}, members={data.get('members_deleted',0)}"
+                print(f"[DEBUG] {msg}")
+                return send_message(chat_id, msg)
+            except Exception as e:
+                print(f"[DEBUG] Ошибка парсинга ответа: {e}")
+                return send_message(chat_id, f"❌ Ошибка парсинга ответа от API: {e}\nОтвет: {dr.text}")
         else:
-            return send_message(chat_id, f"❌ Ошибка очистки: {dr.status_code}")
+            print(f"[DEBUG] Ошибка очистки: {dr.status_code} {dr.text}")
+            return send_message(chat_id, f"❌ Ошибка очистки: {dr.status_code}\nОтвет: {dr.text}")
     except Exception as e:
+        print(f"[DEBUG] Исключение при очистке: {e}")
         return send_message(chat_id, f"❌ Ошибка очистки комнат: {e}")
 
 _current_tournaments = {}
