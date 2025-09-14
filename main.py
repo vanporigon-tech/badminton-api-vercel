@@ -379,6 +379,9 @@ async def set_player_rank(data: PlayerCreate, db: Session = Depends(get_db), for
             mapped = RANK_TO_RATING.get(data.initial_rank)
             if mapped:
                 player.rating = mapped  # ВСЕГДА обновляем рейтинг по рангу
+            # Сбрасываем неопределенность и волатильность после смены ранга
+            player.rd = 350.0
+            player.volatility = 0.06
         db.commit()
         db.refresh(player)
         return player
@@ -532,25 +535,22 @@ def _calculate_and_apply_ratings(db: Session, team1: List[Player], team2: List[P
     changes: Dict[int, Dict] = {}
     for player, (nr, nrd, nvol) in zip(team1, team1_new):
         old = player.rating
-        proposed = int(round(nr))
-        delta = proposed - old
-        # RD-aware clamp: larger RD allows slightly bigger moves, small RD tightens
+        delta_raw = float(nr - old)
+        sign = 1 if delta_raw > 0 else (-1 if delta_raw < 0 else 0)
         rd = float(player.rd or 350.0)
         cap = 30 if rd < 100 else (40 if rd < 200 else (60 if rd < 300 else 80))
-        if abs(delta) > cap:
-            logger.info(f"↔️ Clamp t1 {player.telegram_id}: {delta} → {max(-cap, min(cap, delta))} (RD={rd:.1f})")
-            delta = max(-cap, min(cap, delta))
-            proposed = old + delta
-        # Scale progression smoothly: divide by 5 but keep fractional accumulation via rd
-        # Use ceiling/floor to avoid losing small gains entirely
-        if delta > 0:
-            scaled = max(1, int((delta + 2) // 5))
-        elif delta < 0:
-            scaled = min(-1, -int((abs(delta) + 2) // 5))
+        if abs(delta_raw) > cap:
+            delta_raw = sign * cap
+        # Scale progression smoothly
+        if sign != 0:
+            scaled_mag = max(1, int((abs(delta_raw) + 2) // 5))
+            scaled = sign * scaled_mag
         else:
             scaled = 0
-        proposed = old + scaled
-        player.rating = proposed
+        # Guarantee at least ±1 on decisive games
+        if s1 != 0.5 and scaled == 0:
+            scaled = 1 if s1 > s2 else -1
+        player.rating = old + int(scaled)
         changes[player.telegram_id] = {
             "old_rating": old,
             "new_rating": player.rating,
@@ -564,22 +564,20 @@ def _calculate_and_apply_ratings(db: Session, team1: List[Player], team2: List[P
 
     for player, (nr, nrd, nvol) in zip(team2, team2_new):
         old = player.rating
-        proposed = int(round(nr))
-        delta = proposed - old
+        delta_raw = float(nr - old)
+        sign = 1 if delta_raw > 0 else (-1 if delta_raw < 0 else 0)
         rd = float(player.rd or 350.0)
         cap = 30 if rd < 100 else (40 if rd < 200 else (60 if rd < 300 else 80))
-        if abs(delta) > cap:
-            logger.info(f"↔️ Clamp t2 {player.telegram_id}: {delta} → {max(-cap, min(cap, delta))} (RD={rd:.1f})")
-            delta = max(-cap, min(cap, delta))
-            proposed = old + delta
-        if delta > 0:
-            scaled = max(1, int((delta + 2) // 5))
-        elif delta < 0:
-            scaled = min(-1, -int((abs(delta) + 2) // 5))
+        if abs(delta_raw) > cap:
+            delta_raw = sign * cap
+        if sign != 0:
+            scaled_mag = max(1, int((abs(delta_raw) + 2) // 5))
+            scaled = sign * scaled_mag
         else:
             scaled = 0
-        proposed = old + scaled
-        player.rating = proposed
+        if s2 != 0.5 and scaled == 0:
+            scaled = 1 if s2 > s1 else -1
+        player.rating = old + int(scaled)
         changes[player.telegram_id] = {
             "old_rating": old,
             "new_rating": player.rating,
