@@ -273,20 +273,37 @@ def handle_admin_clear_rooms(chat_id, user_id):
     try:
         send_message(chat_id, "⏳ Очищаю комнаты...")
         print(f"🔧 Очистка через API: {API_BASE_URL}/rooms/clear_all")
-        dr = requests.delete(f"{API_BASE_URL}/rooms/clear_all", timeout=30)
-        print(f"🔧 Результат очистки: status={dr.status_code} body={dr.text[:200]}")
-        if dr.status_code == 200:
+        # Несколько попыток с бэкоффом и короткими таймаутами
+        attempts = 3
+        timeouts = [(5, 8), (5, 10), (5, 12)]  # (connect, read)
+        last_error = None
+        for attempt in range(attempts):
             try:
-                data = dr.json()
-                msg = f"✅ Очистка завершена: rooms={data.get('rooms_deleted',0)}, members={data.get('members_deleted',0)}"
-                print(f"[DEBUG] {msg}")
-                return send_message(chat_id, msg)
-            except Exception as e:
-                print(f"[DEBUG] Ошибка парсинга ответа: {e}")
-                return send_message(chat_id, f"❌ Ошибка парсинга ответа от API: {e}\nОтвет: {dr.text}")
-        else:
-            print(f"[DEBUG] Ошибка очистки: {dr.status_code} {dr.text}")
-            return send_message(chat_id, f"❌ Ошибка очистки: {dr.status_code}\nОтвет: {dr.text}")
+                connect_timeout, read_timeout = timeouts[min(attempt, len(timeouts) - 1)]
+                dr = requests.delete(f"{API_BASE_URL}/rooms/clear_all", timeout=(connect_timeout, read_timeout))
+                print(f"🔧 Результат очистки (попытка {attempt+1}/{attempts}): status={dr.status_code} body={dr.text[:200]}")
+                if dr.status_code == 200:
+                    try:
+                        data = dr.json()
+                        msg = f"✅ Очистка завершена: rooms={data.get('rooms_deleted',0)}, members={data.get('members_deleted',0)}"
+                        print(f"[DEBUG] {msg}")
+                        return send_message(chat_id, msg)
+                    except Exception as e:
+                        print(f"[DEBUG] Ошибка парсинга ответа: {e}")
+                        return send_message(chat_id, f"❌ Ошибка парсинга ответа от API: {e}\nОтвет: {dr.text}")
+                else:
+                    print(f"[DEBUG] Ошибка очистки: {dr.status_code} {dr.text}")
+                    return send_message(chat_id, f"❌ Ошибка очистки: {dr.status_code}\nОтвет: {dr.text}")
+            except requests.exceptions.Timeout as e:
+                last_error = f"Timeout: {e}"
+                print(f"[DEBUG] Таймаут запроса на попытке {attempt+1}: {e}")
+            except requests.exceptions.RequestException as e:
+                last_error = str(e)
+                print(f"[DEBUG] Ошибка сети на попытке {attempt+1}: {e}")
+            if attempt < attempts - 1:
+                send_message(chat_id, f"⏳ Сервер медленно отвечает, повтор {attempt+2}/{attempts}...")
+                time.sleep(1.5 * (attempt + 1))
+        return send_message(chat_id, f"❌ Не удалось очистить комнаты: {last_error or 'неизвестная ошибка'}")
     except Exception as e:
         print(f"[DEBUG] Исключение при очистке: {e}")
         return send_message(chat_id, f"❌ Ошибка очистки комнат: {e}")
