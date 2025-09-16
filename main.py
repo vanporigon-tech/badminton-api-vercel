@@ -707,7 +707,7 @@ async def create_game(game: GameCreate, db: Session = Depends(get_db)):
 
         # Update Google Users sheet
         try:
-            from google_sheets import update_users_sheet
+            # Google Sheets интеграция удалена
 
             # Export minimal users data
             users = [
