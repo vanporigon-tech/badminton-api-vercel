@@ -358,9 +358,8 @@ def handle_end_tournament(chat_id, user_id):
         return send_message(chat_id, f"❌ Ошибка при завершении турнира: {str(e)}")
 
 def create_tournament_table(tournament_id, data):
-    """Создать Google Таблицу с результатами турнира"""
-    from google_sheets import create_tournament_table as create_sheets_table
-    return create_sheets_table(tournament_id, data)
+    """Интеграция с таблицами отключена"""
+    return None
 
 def process_update(update):
     """Обработка обновления от Telegram"""

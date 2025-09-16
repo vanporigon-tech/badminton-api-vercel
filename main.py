@@ -818,11 +818,8 @@ async def end_tournament(tournament_id: int, db: Session = Depends(get_db)):
         ]
     }
 
-    try:
-        from google_sheets import create_tournament_table
-        url = create_tournament_table(t.id, tournament_data)
-    except Exception as e:
-        url = None
+    # Интеграция с Google Sheets отключена
+    url = None
 
     return {"tournament_id": t.id, "sheet_url": url}
 
@@ -866,11 +863,8 @@ async def end_latest_tournament(db: Session = Depends(get_db)):
         ]
     }
 
-    try:
-        from google_sheets import create_tournament_table
-        url = create_tournament_table(t.id, tournament_data)
-    except Exception:
-        url = None
+    # Интеграция с Google Sheets отключена
+    url = None
     return {"tournament_id": t.id, "sheet_url": url}
 
 @app.get("/rooms/", response_model=List[RoomResponse])
