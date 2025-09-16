@@ -349,7 +349,21 @@ def handle_end_tournament(chat_id, user_id):
             data = resp.json()
             _current_tournaments.pop(chat_id, None)
             tid = data.get('tournament_id')
-            return send_message(chat_id, f"🏁 Турнир #{tid} завершен! Таблица: {data.get('sheet_url','')}")
+            # Запрашиваем текстовый отчёт
+            try:
+                r2 = requests.get(f"{API_BASE_URL}/tournaments/{tid}/report", timeout=20)
+                if r2.status_code == 200:
+                    report = r2.json().get('report', '')
+                    # Отправляем отчёт инициатору и всем админам
+                    send_message(chat_id, report)
+                    for admin_id in ADMIN_IDS:
+                        if admin_id != chat_id:
+                            send_message(admin_id, report)
+                else:
+                    send_message(chat_id, f"🏁 Турнир #{tid} завершен! (без отчёта)")
+            except Exception:
+                send_message(chat_id, f"🏁 Турнир #{tid} завершен! (без отчёта)")
+            return
         else:
             return send_message(chat_id, f"❌ Ошибка завершения турнира: {resp.status_code}")
         

@@ -296,6 +296,81 @@ def _ensure_player(db: Session, telegram_id: int, first_name: str = "Игрок"
     db.refresh(player)
     return player
 
+def _generate_tournament_report(db: Session, tournament: "Tournament") -> str:
+    games = (
+        db.query(Game)
+        .filter(Game.tournament_id == tournament.id)
+        .order_by(Game.played_at.asc(), Game.id.asc())
+        .all()
+    )
+    if not games:
+        return f"🏁 Турнир #{tournament.id} завершён. Игр не было."
+
+    per_player: Dict[int, Dict[str, Any]] = {}
+    for g in games:
+        gp_list = db.query(GamePlayer).filter(GamePlayer.game_id == g.id).all()
+        # determine winner team for this game
+        team1_won = g.score1 > g.score2
+        for gp in gp_list:
+            player = db.query(Player).filter(Player.id == gp.player_id).first()
+            if not player:
+                continue
+            tid = int(player.telegram_id)
+            rec = per_player.get(tid)
+            if rec is None:
+                rec = {
+                    "telegram_id": tid,
+                    "username": player.username or "",
+                    "first_name": player.first_name or "",
+                    "last_name": player.last_name or "",
+                    "first_rating": gp.old_rating,
+                    "last_rating": gp.new_rating,
+                    "games": 0,
+                    "wins": 0,
+                }
+                per_player[tid] = rec
+            # update rolling stats
+            rec["games"] += 1
+            if (gp.team == 1 and team1_won) or (gp.team == 2 and not team1_won):
+                rec["wins"] += 1
+            # last rating becomes this game's new rating
+            rec["last_rating"] = gp.new_rating
+
+    # compose top-3 by rating delta
+    items = list(per_player.values())
+    for it in items:
+        it["losses"] = it["games"] - it["wins"]
+        it["delta"] = (it.get("last_rating") or 0) - (it.get("first_rating") or 0)
+
+    top3 = sorted(items, key=lambda x: x["delta"], reverse=True)[:3]
+
+    def display_name(u: Dict[str, Any]) -> str:
+        if u.get("username"):
+            return "@" + u["username"]
+        # fallback to name
+        name = (u.get("first_name") or "") + (" " + u.get("last_name") if u.get("last_name") else "")
+        return name.strip() or str(u.get("telegram_id", ""))
+
+    lines: List[str] = []
+    lines.append(f"🏁 Турнир #{tournament.id} завершён")
+    lines.append("")
+    lines.append("🔥 Топ-3 по росту рейтинга:")
+    if top3:
+        for i, u in enumerate(top3, start=1):
+            sign = "+" if u["delta"] >= 0 else ""
+            lines.append(f"{i}) {display_name(u)}: {sign}{u['delta']}")
+    else:
+        lines.append("Нет данных")
+    lines.append("")
+    lines.append("📋 Итоги по игрокам:")
+    for u in sorted(items, key=lambda x: x["last_rating"], reverse=True):
+        lines.append(
+            f"- {display_name(u)}: старт {u['first_rating']}, конец {u['last_rating']}, "
+            f"игр {u['games']}, побед {u['wins']}, пораж {u['losses']}"
+        )
+
+    return "\n".join(lines)
+
 class RoomResponse(BaseModel):
     id: int
     name: str
@@ -822,6 +897,15 @@ async def end_tournament(tournament_id: int, db: Session = Depends(get_db)):
     url = None
 
     return {"tournament_id": t.id, "sheet_url": url}
+
+
+@app.get("/tournaments/{tournament_id}/report")
+async def get_tournament_report(tournament_id: int, db: Session = Depends(get_db)):
+    t = db.query(Tournament).filter(Tournament.id == tournament_id).first()
+    if not t:
+        raise HTTPException(status_code=404, detail="Турнир не найден")
+    report = _generate_tournament_report(db, t)
+    return {"report": report}
 
 
 @app.get("/tournaments/active", response_model=TournamentResponse)
