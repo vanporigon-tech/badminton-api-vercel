@@ -19,6 +19,24 @@ class Settings:
     # Telegram
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_BOT_USERNAME: str = os.getenv("TELEGRAM_BOT_USERNAME", "")
+    # По умолчанию используем публичные URL, чтобы бот и Mini App были согласованы
+    MINI_APP_URL: str = os.getenv("MINI_APP_URL", "https://vanporigon-tech.github.io/badminton-rating-app")
+    API_BASE_URL: str = os.getenv("API_BASE_URL", "https://badminton-api-vercel.onrender.com")
+    
+    # Admins
+    @property
+    def ADMIN_IDS(self):
+        raw = os.getenv("ADMIN_IDS", "")
+        ids = []
+        for part in raw.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                ids.append(int(part))
+            except ValueError:
+                continue
+        return set(ids)
     
     # Security
     SECRET_KEY: str = os.getenv("SECRET_KEY", "your-secret-key-here")
