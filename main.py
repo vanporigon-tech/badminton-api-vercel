@@ -433,6 +433,9 @@ async def create_or_get_player(player: PlayerCreate, db: Session = Depends(get_d
                 existing_player.last_name = player.last_name
             if player.username:
                 existing_player.username = player.username
+            # Если из Mini App пришёл явный рейтинг — обновим его
+            if isinstance(getattr(player, "rating", None), int) and player.rating > 0:
+                existing_player.rating = player.rating
             if player.initial_rank and not existing_player.initial_rank:
                 existing_player.initial_rank = player.initial_rank
                 if player.initial_rank in RANK_TO_RATING and existing_player.rating == 1500:
