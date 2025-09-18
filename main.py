@@ -510,10 +510,10 @@ async def admin_reset_all(secret: Optional[str] = None, db: Session = Depends(ge
         # Удалим комнаты и участников
         db.execute(text("DELETE FROM room_members"))
         db.execute(text("DELETE FROM rooms"))
-        # Сбросим игроков
-        db.execute(text("UPDATE players SET rating=1500, rd=350.0, volatility=0.06, initial_rank=NULL, rank_changes_used=0, games_count=0"))
+        # Полностью удалим всех игроков
+        db.execute(text("DELETE FROM players"))
         db.commit()
-        return {"status": "ok"}
+        return {"status": "ok", "players": 0}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
