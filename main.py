@@ -217,6 +217,7 @@ class PlayerCreate(BaseModel):
     last_name: Optional[str] = None
     username: Optional[str] = None
     initial_rank: Optional[str] = None
+    rating: Optional[int] = None  # Стартовый рейтинг, присланный из Mini App
 
 class PlayerResponse(BaseModel):
     id: int
@@ -443,8 +444,12 @@ async def create_or_get_player(player: PlayerCreate, db: Session = Depends(get_d
         # Создаем нового игрока
         initial_data = player.dict()
         init_rank = initial_data.pop("initial_rank", None)
+        start_rating = initial_data.pop("rating", None)
         new_player = Player(**initial_data)
-        if init_rank:
+        # Приоритет: явный рейтинг из Mini App
+        if isinstance(start_rating, int) and start_rating > 0:
+            new_player.rating = start_rating
+        elif init_rank:
             new_player.initial_rank = init_rank
             if init_rank in RANK_TO_RATING:
                 new_player.rating = RANK_TO_RATING[init_rank]
@@ -461,30 +466,9 @@ async def create_or_get_player(player: PlayerCreate, db: Session = Depends(get_d
 
 
 @app.post("/players/set_rank", response_model=PlayerResponse)
-async def set_player_rank(data: PlayerCreate, db: Session = Depends(get_db), force: bool = False):
-    """Устанавливает ранг игрока (G..A) и синхронно меняет рейтинг согласно карте RANK_TO_RATING.
-
-    Поведение:
-    - Создаёт игрока при отсутствии.
-    - ВСЕГДА обновляет rating, rd и volatility при смене initial_rank, независимо от наличия игр.
-    - Возвращает актуальные данные игрока.
-    """
-    try:
-        player = db.query(Player).filter(Player.telegram_id == data.telegram_id).first()
-        if not player:
-            player = _ensure_player(db, data.telegram_id, data.first_name, data.last_name, data.username)
-        if data.initial_rank:
-            try:
-                _apply_rank_change(player, data.initial_rank)
-            except ValueError as ve:
-                raise HTTPException(status_code=400, detail=str(ve))
-        db.commit()
-        db.refresh(player)
-        return player
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def set_player_rank(_: PlayerCreate, db: Session = Depends(get_db)):
+    """[DEPRECATED] Используйте ввод стартового рейтинга в Mini App и POST /players/ с rating."""
+    raise HTTPException(status_code=410, detail="set_rank deprecated; use Mini App rating input and /players/")
 
 @app.get("/players/{telegram_id}", response_model=PlayerResponse)
 async def get_player(telegram_id: int, db: Session = Depends(get_db)):
@@ -505,6 +489,31 @@ async def admin_set_player_rating(telegram_id: int, rating: int, db: Session = D
         player.rating = int(rating)
         db.commit()
         return {"telegram_id": telegram_id, "old_rating": old, "new_rating": player.rating}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/admin/reset_all")
+async def admin_reset_all(secret: Optional[str] = None, db: Session = Depends(get_db)):
+    """Сбросить всех пользователей до состояния "новые".
+
+    Удаляет все игры, комнаты, турниры и обнуляет игроков до стартовых значений.
+    Для простоты — требуем секрет через query (?secret=...)
+    """
+    expected = os.getenv("ADMIN_RESET_SECRET", "reset123")
+    if secret != expected:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        # Удалим игры и связи
+        db.execute(text("DELETE FROM game_players"))
+        db.execute(text("DELETE FROM games"))
+        # Удалим комнаты и участников
+        db.execute(text("DELETE FROM room_members"))
+        db.execute(text("DELETE FROM rooms"))
+        # Сбросим игроков
+        db.execute(text("UPDATE players SET rating=1500, rd=350.0, volatility=0.06, initial_rank=NULL, rank_changes_used=0, games_count=0"))
+        db.commit()
+        return {"status": "ok"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
