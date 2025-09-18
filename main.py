@@ -8,7 +8,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import logging
 from dotenv import load_dotenv
 
@@ -286,6 +286,24 @@ RANK_TO_RATING: Dict[str, int] = {
     "A": 1700,
 }
 
+def _apply_rank_change(player: Player, new_rank: str) -> None:
+    """Применяет смену ранга игрока и синхронно обновляет рейтинг, RD и волатильность.
+
+    Всегда обновляет рейтинг согласно карте RANK_TO_RATING, независимо от наличия игр.
+    Бросает ValueError при неизвестном ранге.
+    """
+    if not new_rank:
+        raise ValueError("initial_rank is required")
+    rank_key = str(new_rank).upper().strip()
+    if rank_key not in RANK_TO_RATING:
+        raise ValueError(f"Unknown rank: {new_rank}")
+
+    player.initial_rank = rank_key
+    player.rating = RANK_TO_RATING[rank_key]
+    # Сбрасываем неопределенность и волатильность после смены ранга
+    player.rd = 350.0
+    player.volatility = 0.06
+
 def _ensure_player(db: Session, telegram_id: int, first_name: str = "Игрок", last_name: Optional[str] = None, username: Optional[str] = None) -> Player:
     player = db.query(Player).filter(Player.telegram_id == telegram_id).first()
     if player:
@@ -444,22 +462,27 @@ async def create_or_get_player(player: PlayerCreate, db: Session = Depends(get_d
 
 @app.post("/players/set_rank", response_model=PlayerResponse)
 async def set_player_rank(data: PlayerCreate, db: Session = Depends(get_db), force: bool = False):
-    """Установить начальный ранг игрока (G..A) и применить стартовый рейтинг, даже если уже были игры."""
+    """Устанавливает ранг игрока (G..A) и синхронно меняет рейтинг согласно карте RANK_TO_RATING.
+
+    Поведение:
+    - Создаёт игрока при отсутствии.
+    - ВСЕГДА обновляет rating, rd и volatility при смене initial_rank, независимо от наличия игр.
+    - Возвращает актуальные данные игрока.
+    """
     try:
         player = db.query(Player).filter(Player.telegram_id == data.telegram_id).first()
         if not player:
             player = _ensure_player(db, data.telegram_id, data.first_name, data.last_name, data.username)
         if data.initial_rank:
-            player.initial_rank = data.initial_rank
-            mapped = RANK_TO_RATING.get(data.initial_rank)
-            if mapped:
-                player.rating = mapped  # ВСЕГДА обновляем рейтинг по рангу
-            # Сбрасываем неопределенность и волатильность после смены ранга
-            player.rd = 350.0
-            player.volatility = 0.06
+            try:
+                _apply_rank_change(player, data.initial_rank)
+            except ValueError as ve:
+                raise HTTPException(status_code=400, detail=str(ve))
         db.commit()
         db.refresh(player)
         return player
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -780,24 +803,7 @@ async def create_game(game: GameCreate, db: Session = Depends(get_db)):
 
         db.commit()
 
-        # Update Google Users sheet
-        try:
-            # Google Sheets интеграция удалена
-
-            # Export minimal users data
-            users = [
-                {
-                    "telegram_id": p.telegram_id,
-                    "name": f"{p.first_name} {p.last_name or ''}".strip(),
-                    "username": p.username,
-                    "games_played": p.games_count or 0,
-                    "rating": p.rating,
-                }
-                for p in db.query(Player).all()
-            ]
-            update_users_sheet(users)
-        except Exception:
-            pass
+        # Google Sheets интеграция удалена полностью (ускорение отклика)
 
         # Обновляем состояние комнаты, чтобы все участники увидели результат
         if game.room_id:
@@ -838,7 +844,7 @@ async def end_tournament(tournament_id: int, db: Session = Depends(get_db)):
     t.ended_at = datetime.utcnow()
     db.commit()
 
-    # Build games structure for sheets
+    # Sheets экспорт отключён
     games = db.query(Game).filter(Game.tournament_id == t.id).all()
     players_stats: Dict[int, Dict] = {}
     # Aggregate stats from GamePlayer
@@ -873,7 +879,7 @@ async def end_tournament(tournament_id: int, db: Session = Depends(get_db)):
             ps["rating_change"] += gp.rating_change
             ps["new_rating"] = gp.new_rating
 
-    # Compose tournament_data format for sheets lib
+    # Sheets формат ранее использовался — теперь отключено
     tournament_data = {
         "games": [
             {
