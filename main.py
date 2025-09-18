@@ -504,14 +504,10 @@ async def admin_reset_all(secret: Optional[str] = None, db: Session = Depends(ge
     if secret != expected:
         raise HTTPException(status_code=403, detail="Forbidden")
     try:
-        # Удалим игры и связи
-        db.execute(text("DELETE FROM game_players"))
-        db.execute(text("DELETE FROM games"))
-        # Удалим комнаты и участников
-        db.execute(text("DELETE FROM room_members"))
-        db.execute(text("DELETE FROM rooms"))
-        # Полностью удалим всех игроков
-        db.execute(text("DELETE FROM players"))
+        # Полное очищение с каскадом и сбросом идентификаторов
+        db.execute(text(
+            "TRUNCATE TABLE game_players, games, room_members, rooms, players RESTART IDENTITY CASCADE"
+        ))
         db.commit()
         return {"status": "ok", "players": 0}
     except Exception as e:
