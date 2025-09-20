@@ -316,12 +316,14 @@ def _ensure_player(db: Session, telegram_id: int, first_name: str = "Игрок"
     return player
 
 def _generate_tournament_report(db: Session, tournament: "Tournament") -> str:
+    print(f"📊 ГЕНЕРАЦИЯ ОТЧЕТА ДЛЯ ТУРНИРА #{tournament.id}")
     games = (
         db.query(Game)
         .filter(Game.tournament_id == tournament.id)
         .order_by(Game.played_at.asc(), Game.id.asc())
         .all()
     )
+    print(f"🎮 НАЙДЕНО ИГР В ТУРНИРЕ: {len(games)}")
     if not games:
         return f"🏁 Турнир #{tournament.id} завершён. Игр не было."
 
@@ -767,6 +769,7 @@ async def create_game(game: GameCreate, db: Session = Depends(get_db)):
         changes = _calculate_and_apply_ratings(db, team1, team2, game.score1, game.score2)
 
         # Persist Game and per-player entries
+        print(f"🎮 СОЗДАНИЕ ИГРЫ: tournament_id={game.tournament_id}, room_id={game.room_id}, score1={game.score1}, score2={game.score2}")
         new_game = Game(
             room_id=game.room_id,
             tournament_id=game.tournament_id,
@@ -776,6 +779,7 @@ async def create_game(game: GameCreate, db: Session = Depends(get_db)):
         db.add(new_game)
         db.commit()
         db.refresh(new_game)
+        print(f"✅ ИГРА СОЗДАНА: id={new_game.id}, tournament_id={new_game.tournament_id}")
 
         for p in team1:
             ch = changes[p.telegram_id]
