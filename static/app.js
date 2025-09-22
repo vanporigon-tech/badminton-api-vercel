@@ -399,10 +399,10 @@ async function joinRoom(roomId) {
                         showRoomDetails(roomId);
                     }, 800);
                 } else {
-                    showMessage(msg || 'Ошибка присоединения', 'error');
+                    console.error('Join room error:', msg || 'Ошибка присоединения');
                 }
             } catch (e) {
-                showMessage('Ошибка присоединения', 'error');
+                console.error('Join room error:', e);
             }
         }
     } catch (error) {
@@ -892,10 +892,9 @@ async function handleJoinRoom() {
             }, 1500);
         } else {
             const error = await response.json();
-            showMessage(error.detail || 'Ошибка присоединения к комнате', 'error');
+            console.error('Join room error:', error);
         }
     } catch (error) {
         console.error('Join room error:', error);
-        showMessage('Ошибка сети при присоединении к комнате', 'error');
     }
 }
