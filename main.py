@@ -405,33 +405,24 @@ def _generate_tournament_report(db: Session, tournament: "Tournament") -> str:
     ab_players = [u for u in items if u["rank"] in ["A", "B"]]
     ab_sorted = sorted(ab_players, key=lambda x: x["last_rating"], reverse=True)[:3]
     lines.append("🥇 Топ-3 игрока A и B:")
-    if ab_sorted:
-        for i, u in enumerate(ab_sorted, start=1):
-            lines.append(f"{i}) {display_name(u)}: {u['last_rating']}")
-    else:
-        lines.append("Нет игроков ранга A или B")
+    for i, u in enumerate(ab_sorted, start=1):
+        lines.append(f"{i}) {display_name(u)}: {u['last_rating']}")
     lines.append("")
 
     # Топ-3 игрока C и D
     cd_players = [u for u in items if u["rank"] in ["C", "D"]]
     cd_sorted = sorted(cd_players, key=lambda x: x["last_rating"], reverse=True)[:3]
     lines.append("🥈 Топ-3 игрока C и D:")
-    if cd_sorted:
-        for i, u in enumerate(cd_sorted, start=1):
-            lines.append(f"{i}) {display_name(u)}: {u['last_rating']}")
-    else:
-        lines.append("Нет игроков ранга C или D")
+    for i, u in enumerate(cd_sorted, start=1):
+        lines.append(f"{i}) {display_name(u)}: {u['last_rating']}")
     lines.append("")
 
     # Топ-3 игрока E и F
     ef_players = [u for u in items if u["rank"] in ["E", "F"]]
     ef_sorted = sorted(ef_players, key=lambda x: x["last_rating"], reverse=True)[:3]
     lines.append("🥉 Топ-3 игрока E и F:")
-    if ef_sorted:
-        for i, u in enumerate(ef_sorted, start=1):
-            lines.append(f"{i}) {display_name(u)}: {u['last_rating']}")
-    else:
-        lines.append("Нет игроков ранга E или F")
+    for i, u in enumerate(ef_sorted, start=1):
+        lines.append(f"{i}) {display_name(u)}: {u['last_rating']}")
     lines.append("")
 
     # Итоги по игрокам с разностью рейтинга
