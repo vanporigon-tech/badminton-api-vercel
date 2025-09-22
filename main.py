@@ -315,6 +315,21 @@ def _ensure_player(db: Session, telegram_id: int, first_name: str = "Игрок"
     db.refresh(player)
     return player
 
+def _get_rank_from_rating(rating: int) -> str:
+    """Определяет ранг по рейтингу (F=500, E=700, D=900, C=1100, B=1300, A=1500)"""
+    if rating >= 1500:
+        return "A"
+    elif rating >= 1300:
+        return "B"
+    elif rating >= 1100:
+        return "C"
+    elif rating >= 900:
+        return "D"
+    elif rating >= 700:
+        return "E"
+    else:
+        return "F"
+
 def _generate_tournament_report(db: Session, tournament: "Tournament") -> str:
     print(f"📊 ГЕНЕРАЦИЯ ОТЧЕТА ДЛЯ ТУРНИРА #{tournament.id}")
     games = (
@@ -357,13 +372,12 @@ def _generate_tournament_report(db: Session, tournament: "Tournament") -> str:
             # last rating becomes this game's new rating
             rec["last_rating"] = gp.new_rating
 
-    # compose top-3 by rating delta
+    # compose stats
     items = list(per_player.values())
     for it in items:
         it["losses"] = it["games"] - it["wins"]
         it["delta"] = (it.get("last_rating") or 0) - (it.get("first_rating") or 0)
-
-    top3 = sorted(items, key=lambda x: x["delta"], reverse=True)[:3]
+        it["rank"] = _get_rank_from_rating(it.get("last_rating") or 0)
 
     def display_name(u: Dict[str, Any]) -> str:
         if u.get("username"):
@@ -375,19 +389,58 @@ def _generate_tournament_report(db: Session, tournament: "Tournament") -> str:
     lines: List[str] = []
     lines.append(f"🏁 Турнир #{tournament.id} завершён")
     lines.append("")
-    lines.append("🔥 Топ-3 по росту рейтинга:")
-    if top3:
-        for i, u in enumerate(top3, start=1):
-            sign = "+" if u["delta"] >= 0 else ""
-            lines.append(f"{i}) {display_name(u)}: {sign}{u['delta']}")
+
+    # Топ-1 по росту рейтинга
+    top_delta = sorted(items, key=lambda x: x["delta"], reverse=True)[:1]
+    lines.append("🏆 Топ-1 по росту рейтинга:")
+    if top_delta:
+        u = top_delta[0]
+        sign = "+" if u["delta"] >= 0 else ""
+        lines.append(f"🥇 {display_name(u)}: {u['last_rating']} ({sign}{u['delta']})")
     else:
         lines.append("Нет данных")
     lines.append("")
+
+    # Топ-3 игрока A и B
+    ab_players = [u for u in items if u["rank"] in ["A", "B"]]
+    ab_sorted = sorted(ab_players, key=lambda x: x["last_rating"], reverse=True)[:3]
+    lines.append("🥇 Топ-3 игрока A и B:")
+    if ab_sorted:
+        for i, u in enumerate(ab_sorted, start=1):
+            lines.append(f"{i}) {display_name(u)}: {u['last_rating']} (ранг {u['rank']})")
+    else:
+        lines.append("Нет игроков ранга A или B")
+    lines.append("")
+
+    # Топ-3 игрока C и D
+    cd_players = [u for u in items if u["rank"] in ["C", "D"]]
+    cd_sorted = sorted(cd_players, key=lambda x: x["last_rating"], reverse=True)[:3]
+    lines.append("🥈 Топ-3 игрока C и D:")
+    if cd_sorted:
+        for i, u in enumerate(cd_sorted, start=1):
+            lines.append(f"{i}) {display_name(u)}: {u['last_rating']} (ранг {u['rank']})")
+    else:
+        lines.append("Нет игроков ранга C или D")
+    lines.append("")
+
+    # Топ-3 игрока E и F
+    ef_players = [u for u in items if u["rank"] in ["E", "F"]]
+    ef_sorted = sorted(ef_players, key=lambda x: x["last_rating"], reverse=True)[:3]
+    lines.append("🥉 Топ-3 игрока E и F:")
+    if ef_sorted:
+        for i, u in enumerate(ef_sorted, start=1):
+            lines.append(f"{i}) {display_name(u)}: {u['last_rating']} (ранг {u['rank']})")
+    else:
+        lines.append("Нет игроков ранга E или F")
+    lines.append("")
+
+    # Итоги по игрокам с разностью рейтинга
     lines.append("📋 Итоги по игрокам:")
     for u in sorted(items, key=lambda x: x["last_rating"], reverse=True):
+        sign = "+" if u["delta"] >= 0 else ""
         lines.append(
             f"- {display_name(u)}: старт {u['first_rating']}, конец {u['last_rating']}, "
-            f"игр {u['games']}, побед {u['wins']}, пораж {u['losses']}"
+            f"игр {u['games']}, побед {u['wins']}, пораж {u['losses']}, изменение {sign}{u['delta']}"
         )
 
     return "\n".join(lines)
