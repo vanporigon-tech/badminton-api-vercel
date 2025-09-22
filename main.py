@@ -407,7 +407,7 @@ def _generate_tournament_report(db: Session, tournament: "Tournament") -> str:
     lines.append("🥇 Топ-3 игрока A и B:")
     if ab_sorted:
         for i, u in enumerate(ab_sorted, start=1):
-            lines.append(f"{i}) {display_name(u)}: {u['last_rating']} (ранг {u['rank']})")
+            lines.append(f"{i}) {display_name(u)}: {u['last_rating']}")
     else:
         lines.append("Нет игроков ранга A или B")
     lines.append("")
@@ -418,7 +418,7 @@ def _generate_tournament_report(db: Session, tournament: "Tournament") -> str:
     lines.append("🥈 Топ-3 игрока C и D:")
     if cd_sorted:
         for i, u in enumerate(cd_sorted, start=1):
-            lines.append(f"{i}) {display_name(u)}: {u['last_rating']} (ранг {u['rank']})")
+            lines.append(f"{i}) {display_name(u)}: {u['last_rating']}")
     else:
         lines.append("Нет игроков ранга C или D")
     lines.append("")
@@ -429,7 +429,7 @@ def _generate_tournament_report(db: Session, tournament: "Tournament") -> str:
     lines.append("🥉 Топ-3 игрока E и F:")
     if ef_sorted:
         for i, u in enumerate(ef_sorted, start=1):
-            lines.append(f"{i}) {display_name(u)}: {u['last_rating']} (ранг {u['rank']})")
+            lines.append(f"{i}) {display_name(u)}: {u['last_rating']}")
     else:
         lines.append("Нет игроков ранга E или F")
     lines.append("")
